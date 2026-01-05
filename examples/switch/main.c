@@ -37,13 +37,13 @@
 // Configuration - UPDATE THESE VALUES
 // =============================================================================
 
-#define WIFI_SSID       "June"
-#define WIFI_PASSWORD   "wifipassword"
+#define WIFI_SSID       "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
 
 // Get these from https://sinric.pro
-#define APP_KEY         "93e1f2ed-72e1-4ba2-a05b-94b63e4c5e42"
-#define APP_SECRET      "db34b961-72ab-4a95-9cc4-a4341e5844e4-c127c6b6-f2c6-4c56-9f0d-b5e94e561ed0"
-#define DEVICE_ID       "6953721afd289c6add48a9bd"  // 24-character device ID
+#define APP_KEY         "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+#define APP_SECRET      "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+#define DEVICE_ID       "xxxxxxxxxxxxxxxxxxxxxxxx"  // 24-character device ID
 
 // =============================================================================
 // Hardware Configuration
