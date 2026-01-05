@@ -85,14 +85,9 @@ bool sinricpro_init(const sinricpro_config_t *config) {
     }
     if (ctx.config.server_port == 0) {
         ctx.config.server_port = SINRICPRO_SERVER_PORT;
-    }
+    } 
 
-    // Check if user defined SINRICPRO_NOSSL in their sketch
-    #ifdef SINRICPRO_NOSSL
-        ctx.config.use_ssl = false;
-    #else
-        ctx.config.use_ssl = true;
-    #endif
+    ctx.config.use_ssl = config->use_ssl;
 
     if (ctx.config.connect_timeout_ms == 0) {
         ctx.config.connect_timeout_ms = 30000;

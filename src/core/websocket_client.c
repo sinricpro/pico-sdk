@@ -320,6 +320,7 @@ static void ws_dns_callback(const char *name, const ip_addr_t *addr, void *arg) 
     struct altcp_pcb *pcb;
 
     if (ws_ctx.config.use_ssl) {
+        printf("[WS] Create TLS PCB\n");
         // Create TLS PCB
         struct altcp_tls_config *tls_config = altcp_tls_create_config_client(
             NULL, 0);  // No client cert
@@ -332,6 +333,7 @@ static void ws_dns_callback(const char *name, const ip_addr_t *addr, void *arg) 
 
         pcb = altcp_tls_new(tls_config, IPADDR_TYPE_V4);
     } else {
+        printf("[WS] Plain TCP\n");
         // Plain TCP
         pcb = altcp_new(NULL);
     }

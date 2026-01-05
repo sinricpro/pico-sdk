@@ -249,7 +249,8 @@ int main() {
         .app_key = APP_KEY,
         .app_secret = APP_SECRET,
         .wifi_ssid = WIFI_SSID,
-        .wifi_password = WIFI_PASSWORD
+        .wifi_password = WIFI_PASSWORD,
+        .use_ssl = false
     };
 
     // Initialize SDK
