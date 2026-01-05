@@ -100,101 +100,12 @@ int main() {
 3. Copy your App Key, App Secret, and Device ID
 4. Link your SinricPro account with Alexa or Google Home
 
-## Voice Commands
-
-Once connected, control your device with:
-- "Alexa, turn on [device name]"
-- "Alexa, turn off [device name]"
-- "Hey Google, turn on [device name]"
-
-## API Reference
-
-### Initialization
-
-```c
-bool sinricpro_init(const sinricpro_config_t *config);
-bool sinricpro_begin(void);
-void sinricpro_handle(void);
-```
-
-### Device Management
-
-```c
-bool sinricpro_add_device(sinricpro_device_t *device);
-bool sinricpro_is_connected(void);
-```
-
-### Switch Device
-
-```c
-bool sinricpro_switch_init(sinricpro_switch_t *device, const char *device_id);
-void sinricpro_switch_on_power_state(sinricpro_switch_t *device, callback);
-bool sinricpro_switch_send_power_state_event(sinricpro_switch_t *device, bool state);
-```
-
-### DimSwitch Device
-
-```c
-bool sinricpro_dimswitch_init(sinricpro_dimswitch_t *device, const char *device_id);
-void sinricpro_dimswitch_on_power_state(sinricpro_dimswitch_t *device, callback);
-void sinricpro_dimswitch_on_brightness(sinricpro_dimswitch_t *device, callback);
-void sinricpro_dimswitch_on_adjust_brightness(sinricpro_dimswitch_t *device, callback);
-bool sinricpro_dimswitch_send_power_state_event(sinricpro_dimswitch_t *device, bool state);
-bool sinricpro_dimswitch_send_brightness_event(sinricpro_dimswitch_t *device, int brightness);
-```
-
-## Project Structure
-
-```
-pico-sdk/
-├── CMakeLists.txt
-├── include/sinricpro/     # Public headers
-│   ├── sinricpro.h
-│   ├── sinricpro_config.h
-│   ├── sinricpro_device.h
-│   ├── sinricpro_switch.h
-│   └── sinricpro_dimswitch.h
-├── src/
-│   ├── core/              # Core implementation
-│   ├── capabilities/      # Device capabilities (power_state, brightness)
-│   └── devices/           # Device types (switch, dimswitch)
-├── lib/cJSON/             # JSON library (submodule)
-└── examples/
-    ├── switch/            # Basic switch example
-    └── dimswitch/         # Dimmable switch example
-```
-
-## Memory Usage
-
-Approximate RAM usage:
-- WiFi/lwIP stack: ~40 KB
-- TLS buffers: ~32 KB
-- SDK buffers: ~30 KB
-- **Total**: ~100 KB (leaving ~164 KB free on Pico W)
-
-## Troubleshooting
-
-### WiFi not connecting
-- Check SSID and password
-- Ensure 2.4 GHz network (5 GHz not supported)
-- Try moving closer to router
-
-### WebSocket connection fails
-- Verify App Key and App Secret
-- Check firewall allows outbound port 443
-- Ensure device ID matches portal
-
-### No response to voice commands
-- Verify SinricPro account is linked in Alexa/Google app
-- Check device shows "Online" in SinricPro dashboard
-- Try "Alexa, discover devices"
-
 ## License
 
 MIT License - see LICENSE file
 
 ## Links
 
-- [SinricPro Portal](https://sinric.pro)
+- [SinricPro Portal](https://portal.sinric.pro)
 - [SinricPro Documentation](https://help.sinric.pro)
 - [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk)
