@@ -12,10 +12,25 @@ Native C SDK for connecting Raspberry Pi Pico W devices to [SinricPro](https://s
 
 ## Supported Devices
 
-- **Switch** - On/off control for relays, smart plugs, etc.
-- **DimSwitch** - Dimmable switch with brightness control (0-100%)
+### Actuators
+- **Switch** - Simple on/off control for relays, smart plugs, etc.
+- **DimSwitch** - Dimmable switch with power level control (0-100%)
+- **Light** - RGB+CCT smart light with full color and color temperature control
+  - On/off control
+  - Brightness adjustment (0-100%)
+  - RGB color (0-255 per channel)
+  - Color temperature (2200K-7000K warm to cool white)
 
-More device types coming soon (Light, Temperature Sensor, etc.)
+### Sensors
+- **Motion Sensor** - PIR motion detection for automation and security
+- **Temperature Sensor** - Temperature and humidity monitoring
+- **Contact Sensor** - Door/window open/close detection
+
+All devices support:
+- Voice control via Alexa and Google Home
+- SinricPro mobile app integration
+- Alexa routines and automations
+- Real-time status updates
 
 ## Requirements
 
@@ -90,6 +105,23 @@ int main() {
     }
 }
 ```
+
+## Examples
+
+The SDK includes complete examples for all device types:
+
+- **`examples/switch/`** - Basic on/off relay control
+- **`examples/dimswitch/`** - Dimmable LED with PWM control
+- **`examples/light/`** - RGB+CCT LED strip with full color control
+- **`examples/motion_sensor/`** - PIR motion detection
+- **`examples/temperature_sensor/`** - Temperature/humidity monitoring (uses built-in RP2040 sensor)
+- **`examples/contact_sensor/`** - Door/window sensor with magnetic reed switch
+
+Each example includes:
+- Complete working code with detailed comments
+- Hardware connection diagrams in comments
+- Voice command examples
+- Configuration instructions
 
 ## Getting Credentials
 
