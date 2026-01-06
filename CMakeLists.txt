@@ -44,10 +44,20 @@ add_library(sinricpro STATIC
     # Capabilities
     src/capabilities/power_state.c
     src/capabilities/brightness.c
+    src/capabilities/power_level.c
+    src/capabilities/color.c
+    src/capabilities/color_temperature.c
+    src/capabilities/motion_sensor.c
+    src/capabilities/temperature_sensor.c
+    src/capabilities/contact_sensor.c
 
     # Devices
     src/devices/sinricpro_switch.c
     src/devices/sinricpro_dimswitch.c
+    src/devices/sinricpro_light.c
+    src/devices/sinricpro_motion_sensor.c
+    src/devices/sinricpro_temperature_sensor.c
+    src/devices/sinricpro_contact_sensor.c
 )
 
 target_include_directories(sinricpro PUBLIC
@@ -80,6 +90,10 @@ option(SINRICPRO_BUILD_EXAMPLES "Build SinricPro examples" ON)
 if(SINRICPRO_BUILD_EXAMPLES)
     add_subdirectory(examples/switch)
     add_subdirectory(examples/dimswitch)
+    add_subdirectory(examples/light)
+    add_subdirectory(examples/motion_sensor)
+    add_subdirectory(examples/temperature_sensor)
+    add_subdirectory(examples/contact_sensor)
 endif()
 
 # =============================================================================
