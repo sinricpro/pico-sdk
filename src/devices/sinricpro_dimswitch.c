@@ -5,7 +5,7 @@
 
 #include "sinricpro/sinricpro_dimswitch.h"
 #include "sinricpro/capabilities/power_state.h"
-#include "sinricpro/capabilities/brightness.h"
+#include "sinricpro/capabilities/power_level.h"
 #include "core/json_helpers.h"
 #include "core/sinricpro_debug.h"
 #include <stdio.h>
@@ -33,7 +33,7 @@ bool sinricpro_dimswitch_init(sinricpro_dimswitch_t *device, const char *device_
 
     // Initialize capabilities
     sinricpro_power_state_init(&device->power_state);
-    sinricpro_brightness_init(&device->brightness);
+    sinricpro_power_level_init(&device->power_level);
 
     SINRICPRO_DEBUG_PRINTF("[DimSwitch] Initialized device: %s\n", device_id);
     return true;
@@ -46,17 +46,17 @@ void sinricpro_dimswitch_on_power_state(sinricpro_dimswitch_t *device,
     }
 }
 
-void sinricpro_dimswitch_on_brightness(sinricpro_dimswitch_t *device,
-                                       sinricpro_brightness_callback_t callback) {
+void sinricpro_dimswitch_on_power_level(sinricpro_dimswitch_t *device,
+                                        sinricpro_power_level_callback_t callback) {
     if (device) {
-        sinricpro_brightness_set_callback(&device->brightness, callback);
+        sinricpro_power_level_set_callback(&device->power_level, callback);
     }
 }
 
-void sinricpro_dimswitch_on_adjust_brightness(sinricpro_dimswitch_t *device,
-                                              sinricpro_adjust_brightness_callback_t callback) {
+void sinricpro_dimswitch_on_adjust_power_level(sinricpro_dimswitch_t *device,
+                                               sinricpro_adjust_power_level_callback_t callback) {
     if (device) {
-        sinricpro_brightness_set_adjust_callback(&device->brightness, callback);
+        sinricpro_power_level_set_adjust_callback(&device->power_level, callback);
     }
 }
 
@@ -70,14 +70,14 @@ bool sinricpro_dimswitch_send_power_state_event(sinricpro_dimswitch_t *device, b
                                             state);
 }
 
-bool sinricpro_dimswitch_send_brightness_event(sinricpro_dimswitch_t *device, int brightness) {
+bool sinricpro_dimswitch_send_power_level_event(sinricpro_dimswitch_t *device, int power_level) {
     if (!device) {
         return false;
     }
 
-    return sinricpro_brightness_send_event(&device->brightness,
-                                           device->base.device_id,
-                                           brightness);
+    return sinricpro_power_level_send_event(&device->power_level,
+                                            device->base.device_id,
+                                            power_level);
 }
 
 bool sinricpro_dimswitch_get_power_state(const sinricpro_dimswitch_t *device) {
@@ -88,12 +88,12 @@ bool sinricpro_dimswitch_get_power_state(const sinricpro_dimswitch_t *device) {
     return sinricpro_power_state_get_state(&device->power_state);
 }
 
-int sinricpro_dimswitch_get_brightness(const sinricpro_dimswitch_t *device) {
+int sinricpro_dimswitch_get_power_level(const sinricpro_dimswitch_t *device) {
     if (!device) {
         return 0;
     }
 
-    return sinricpro_brightness_get_value(&device->brightness);
+    return sinricpro_power_level_get_value(&device->power_level);
 }
 
 // ============================================================================
@@ -112,14 +112,14 @@ static bool dimswitch_handle_request(sinricpro_device_t *device,
                                                     device, request, response);
     }
 
-    if (strcmp(action, "setBrightness") == 0) {
-        return sinricpro_brightness_handle_set_request(&dimswitch->brightness,
-                                                       device, request, response);
+    if (strcmp(action, "setPowerLevel") == 0) {
+        return sinricpro_power_level_handle_set_request(&dimswitch->power_level,
+                                                        device, request, response);
     }
 
-    if (strcmp(action, "adjustBrightness") == 0) {
-        return sinricpro_brightness_handle_adjust_request(&dimswitch->brightness,
-                                                          device, request, response);
+    if (strcmp(action, "adjustPowerLevel") == 0) {
+        return sinricpro_power_level_handle_adjust_request(&dimswitch->power_level,
+                                                           device, request, response);
     }
 
     SINRICPRO_WARN_PRINTF("[DimSwitch] Unknown action: %s\n", action);

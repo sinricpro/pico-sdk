@@ -66,7 +66,7 @@
 
 static sinricpro_dimswitch_t my_dimmer;
 static bool current_power_state = false;
-static int current_brightness = 100;  // Default 100%
+static int current_power_level = 100;  // Default 100%
 static uint32_t last_button_press = 0;
 static uint pwm_slice;
 
@@ -100,11 +100,11 @@ void set_led_brightness(int brightness) {
 }
 
 /**
- * @brief Update LED output based on power state and brightness
+ * @brief Update LED output based on power state and power level
  */
 void update_led(void) {
     if (current_power_state) {
-        set_led_brightness(current_brightness);
+        set_led_brightness(current_power_level);
     } else {
         set_led_brightness(0);
     }
@@ -160,15 +160,15 @@ bool on_power_state(sinricpro_device_t *device, bool *state) {
 }
 
 /**
- * @brief Handle brightness change from cloud
+ * @brief Handle power level change from cloud
  */
-bool on_brightness(sinricpro_device_t *device, int *brightness) {
-    printf("[Callback] Brightness: %d%%\n", *brightness);
+bool on_power_level(sinricpro_device_t *device, int *power_level) {
+    printf("[Callback] Power level: %d%%\n", *power_level);
 
-    current_brightness = *brightness;
+    current_power_level = *power_level;
 
-    // If brightness is set while off, turn on
-    if (current_brightness > 0 && !current_power_state) {
+    // If power level is set while off, turn on
+    if (current_power_level > 0 && !current_power_state) {
         current_power_state = true;
     }
 
@@ -178,23 +178,23 @@ bool on_brightness(sinricpro_device_t *device, int *brightness) {
 }
 
 /**
- * @brief Handle adjust brightness from cloud (dim/brighten commands)
+ * @brief Handle adjust power level from cloud (dim/brighten commands)
  */
-bool on_adjust_brightness(sinricpro_device_t *device, int *brightness_delta) {
-    printf("[Callback] Adjust brightness: %+d%%\n", *brightness_delta);
+bool on_adjust_power_level(sinricpro_device_t *device, int *power_level_delta) {
+    printf("[Callback] Adjust power level: %+d%%\n", *power_level_delta);
 
-    // Apply delta to current brightness
-    current_brightness += *brightness_delta;
+    // Apply delta to current power level
+    current_power_level += *power_level_delta;
 
     // Clamp to 0-100
-    if (current_brightness < 0) current_brightness = 0;
-    if (current_brightness > 100) current_brightness = 100;
+    if (current_power_level < 0) current_power_level = 0;
+    if (current_power_level > 100) current_power_level = 100;
 
-    // Return absolute brightness
-    *brightness_delta = current_brightness;
+    // Return absolute power level
+    *power_level_delta = current_power_level;
 
     // Turn on if adjusting while off
-    if (current_brightness > 0 && !current_power_state) {
+    if (current_power_level > 0 && !current_power_state) {
         current_power_state = true;
     }
 
@@ -337,8 +337,8 @@ int main() {
 
     // Set callbacks
     sinricpro_dimswitch_on_power_state(&my_dimmer, on_power_state);
-    sinricpro_dimswitch_on_brightness(&my_dimmer, on_brightness);
-    sinricpro_dimswitch_on_adjust_brightness(&my_dimmer, on_adjust_brightness);
+    sinricpro_dimswitch_on_power_level(&my_dimmer, on_power_level);
+    sinricpro_dimswitch_on_adjust_power_level(&my_dimmer, on_adjust_power_level);
 
     // Add device to SinricPro
     if (!sinricpro_add_device((sinricpro_device_t *)&my_dimmer)) {
@@ -379,8 +379,8 @@ int main() {
             current_power_state = !current_power_state;
             update_led();
 
-            printf("[Button] Power: %s (brightness: %d%%)\n",
-                   current_power_state ? "ON" : "OFF", current_brightness);
+            printf("[Button] Power: %s (power level: %d%%)\n",
+                   current_power_state ? "ON" : "OFF", current_power_level);
 
             // Send event to cloud
             if (sinricpro_is_connected()) {
