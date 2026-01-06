@@ -1,0 +1,81 @@
+name: Device Type Request
+description: Request support for a new SinricPro device type
+title: "[DEVICE] "
+labels: ["enhancement", "new-device"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request support for a new SinricPro device type.
+
+  - type: input
+    id: device-name
+    attributes:
+      label: Device Type Name
+      description: What is the SinricPro device type name?
+      placeholder: "e.g., Smart Fan, Air Conditioner, Blinds, etc."
+    validations:
+      required: true
+
+  - type: input
+    id: sinricpro-link
+    attributes:
+      label: SinricPro Documentation Link
+      description: Link to the device type documentation on SinricPro
+      placeholder: "https://help.sinric.pro/..."
+
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Required Capabilities
+      description: List the capabilities this device type needs
+      placeholder: |
+        - PowerState (on/off)
+        - FanSpeed (speed control)
+        - RotationSpeed
+        - etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: Describe how you would use this device type
+      placeholder: Describe your project or use case
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Target Hardware
+      description: What hardware components would you use with this device?
+      placeholder: |
+        - Motor driver
+        - Sensors
+        - etc.
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this for your project?
+      options:
+        - Low - Nice to have
+        - Medium - Would be very useful
+        - High - Blocking my project
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have checked that this device type is supported by SinricPro
+          required: true
+        - label: I have checked existing issues for this device type
+          required: true
+        - label: I am willing to help test this device type
+          required: false

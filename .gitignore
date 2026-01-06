@@ -1,2 +1,48 @@
-build/*
+# Build directories
+build/
+cmake-build-*/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!pico_sdk_import.cmake
+!lib/cJSON/CMakeLists.txt
+
+# Compiled output
+*.o
+*.a
+*.so
+*.elf
+*.uf2
+*.bin
+*.hex
+*.dis
+*.map
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Project specific
 PORTING_PLAN.md
+
+# Dependencies (cJSON should be a submodule)
+lib/cJSON/*
+!lib/cJSON/.gitkeep

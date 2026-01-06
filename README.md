@@ -1,5 +1,7 @@
 # SinricPro SDK for Raspberry Pi Pico W
 
+[![Build Examples](https://github.com/sinricpro/pico-sdk/workflows/Build%20Examples/badge.svg)](https://github.com/sinricpro/pico-sdk/actions)
+
 Native C SDK for connecting Raspberry Pi Pico W devices to [SinricPro](https://sinric.pro) smart home platform.
 
 ## Features
@@ -31,6 +33,13 @@ All devices support:
 - SinricPro mobile app integration
 - Alexa routines and automations
 - Real-time status updates
+
+## Documentation
+
+- 📚 **[Quick Start Guide](docs/QUICK_START.md)** - Get started in 10 minutes
+- 🔧 **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- 🤝 **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
+- 📖 **[API Reference](docs/)** - Detailed API documentation
 
 ## Requirements
 
@@ -133,6 +142,13 @@ Each example includes:
 ## License
 
 MIT License - see LICENSE file
+
+
+## Community & Support
+
+- 💬 **[Discord Community](https://discord.gg/rq9vcRcSqA)** - Chat with other users
+- 🐛 **[Report Issues](https://github.com/sinricpro/pico-sdk/issues)** - Bug reports and feature requests
+- 📧 **[Support](https://sinric.pro/support)** - Contact SinricPro support
 
 ## Links
 
