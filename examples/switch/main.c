@@ -24,6 +24,9 @@
 // Uncomment this line to use non-secure WebSocket (port 80) for low memory devices
 #define SINRICPRO_NOSSL
 
+// Uncomment the following line to enable/disable sdk debug output
+#define ENABLE_DEBUG
+
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
@@ -151,6 +154,45 @@ bool check_button(void) {
 }
 
 // =============================================================================
+// WiFi Functions
+// =============================================================================
+
+/**
+ * @brief Connect to WiFi network
+ *
+ * Initializes the WiFi hardware and connects to the specified network.
+ * This must be called before sinricpro_begin().
+ *
+ * @return true if connected successfully, false on error
+ */
+bool connect_wifi(void) {
+    printf("[1/4] Initializing WiFi...\n");
+
+    if (cyw43_arch_init()) {
+        printf("ERROR: Failed to initialize WiFi hardware\n");
+        return false;
+    }
+
+    cyw43_arch_enable_sta_mode();
+
+    printf("[2/4] Connecting to WiFi: %s\n", WIFI_SSID);
+
+    int result = cyw43_arch_wifi_connect_timeout_ms(
+        WIFI_SSID,
+        WIFI_PASSWORD,
+        CYW43_AUTH_WPA2_AES_PSK,
+        30000);  // 30 second timeout
+
+    if (result != 0) {
+        printf("ERROR: WiFi connection failed (error: %d)\n", result);
+        return false;
+    }
+
+    printf("      WiFi connected!\n\n");
+    return true;
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -162,30 +204,52 @@ int main() {
     printf("\n");
     printf("================================================\n");
     printf("SinricPro Switch Example for Pico W\n");
-    printf("SDK Version: %s\n", sinricpro_get_version());
     printf("================================================\n\n");
 
     // Initialize hardware
     init_hardware();
 
-    // Configure SinricPro
-    sinricpro_config_t config = {
-        .app_key = APP_KEY,
-        .app_secret = APP_SECRET,
-        .wifi_ssid = WIFI_SSID,
-        .wifi_password = WIFI_PASSWORD,
-        .use_ssl = false
-    };
+    // =============================================================================
+    // Step 1: Connect to WiFi (user responsibility)
+    // =============================================================================
 
-    // Initialize SDK
-    if (!sinricpro_init(&config)) {
-        printf("ERROR: Failed to initialize SinricPro\n");
+    if (!connect_wifi()) {
+        // Blink LED rapidly on WiFi error
         while (1) {
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
             sleep_ms(100);
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
             sleep_ms(100);
         }
+    }
+
+    // =============================================================================
+    // Step 2: Initialize SinricPro SDK
+    // =============================================================================
+
+    printf("[3/4] Initializing SinricPro SDK...\n");
+
+    sinricpro_config_t config = {
+        .app_key = APP_KEY,
+        .app_secret = APP_SECRET,
+        .server_url = "testws.sinric.pro",
+#ifdef SINRICPRO_NOSSL
+        .use_ssl = false,  // Non-secure mode (port 80)
+#else
+        .use_ssl = true,   // Secure mode (port 443) - default
+#endif
+
+#ifdef ENABLE_DEBUG
+        .enable_debug = true
+#else
+        .enable_debug = false
+#endif
+        
+    };
+
+    if (!sinricpro_init(&config)) {
+        printf("ERROR: Failed to initialize SinricPro\n");
+        while (1) tight_loop_contents();
     }
 
     // Set state change callback
@@ -206,10 +270,13 @@ int main() {
         return 1;
     }
 
-    // Connect to SinricPro
-    printf("\nConnecting...\n");
+    // =============================================================================
+    // Step 3: Connect to SinricPro Server
+    // =============================================================================
+
+    printf("[4/4] Connecting to SinricPro...\n");
     if (!sinricpro_begin()) {
-        printf("ERROR: Failed to connect\n");
+        printf("ERROR: Failed to connect to SinricPro\n");
         return 1;
     }
 
@@ -225,6 +292,9 @@ int main() {
 
     // Main loop
     while (1) {
+        // Get current time (used by multiple features)
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+
         // Process SinricPro events
         sinricpro_handle();
 
@@ -244,7 +314,6 @@ int main() {
 
         // Blink onboard LED when connected
         static uint32_t last_blink = 0;
-        uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_blink > 1000) {
             last_blink = now;
             if (sinricpro_is_connected()) {

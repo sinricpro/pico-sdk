@@ -87,6 +87,9 @@ typedef struct {
     uint32_t connect_timeout_ms;
     uint32_t ping_interval_ms;
     uint32_t ping_timeout_ms;
+
+    // Debug settings
+    bool enable_debug;                  // Enable message logging
 } sinricpro_ws_config_t;
 
 /**

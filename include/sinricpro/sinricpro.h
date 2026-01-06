@@ -20,11 +20,16 @@
  * }
  *
  * int main() {
+ *     // Connect to WiFi first
+ *     cyw43_arch_init();
+ *     cyw43_arch_enable_sta_mode();
+ *     cyw43_arch_wifi_connect_timeout_ms("YourNetwork", "YourPassword",
+ *                                         CYW43_AUTH_WPA2_AES_PSK, 30000);
+ *
+ *     // Initialize SinricPro
  *     sinricpro_config_t config = {
  *         .app_key = "your-app-key",
- *         .app_secret = "your-app-secret",
- *         .wifi_ssid = "YourNetwork",
- *         .wifi_password = "YourPassword"
+ *         .app_secret = "your-app-secret"
  *     };
  *
  *     sinricpro_init(&config);
@@ -66,25 +71,32 @@ typedef enum {
 
 /**
  * @brief SDK configuration structure
+ *
+ * NOTE: WiFi connection must be established before calling sinricpro_begin().
+ * Use cyw43_arch_wifi_connect_timeout_ms() to connect to WiFi first.
+ *
+ * SSL/TLS Mode:
+ * - Set use_ssl = true for secure WebSocket (wss://) on port 443 (default)
+ * - Set use_ssl = false for plain WebSocket (ws://) on port 80
+ * - Tip: Define SINRICPRO_NOSSL at the top of your sketch to default to non-secure mode
  */
 typedef struct {
     // Credentials (required)
     const char *app_key;
     const char *app_secret;
 
-    // WiFi configuration (required)
-    const char *wifi_ssid;
-    const char *wifi_password;
-
     // Server configuration (optional, uses defaults)
     const char *server_url;      // Default: ws.sinric.pro
-    uint16_t server_port;        // Default: 443
-    bool use_ssl;                // Default: true
+    uint16_t server_port;        // Default: 443 if use_ssl=true, 80 if use_ssl=false
+    bool use_ssl;                // true = port 443 (secure), false = port 80 (non-secure)
 
     // Connection settings (optional)
     uint32_t connect_timeout_ms;     // Default: 30000
     uint32_t ping_interval_ms;       // Default: 300000 (5 min)
     uint32_t reconnect_delay_ms;     // Default: 5000
+
+    // Debug settings (optional)
+    bool enable_debug;               // Enable WebSocket message logging (default: false)
 } sinricpro_config_t;
 
 /**

@@ -7,6 +7,7 @@
 
 #include "websocket_client.h"
 #include "sinricpro/sinricpro_config.h"
+#include "sinricpro_debug.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -19,6 +20,8 @@
 #include "lwip/tcp.h"
 #include "lwip/altcp.h"
 #include "lwip/altcp_tls.h"
+#include "lwip/netif.h"
+#include "lwip/ip4_addr.h"
 
 #include "mbedtls/base64.h"
 #include "mbedtls/sha1.h"
@@ -137,7 +140,7 @@ bool sinricpro_ws_connect(const sinricpro_ws_config_t *config) {
         // Already cached - proceed to connect
         ws_dns_callback(config->host, &ws_ctx.server_ip, NULL);
     } else if (err != ERR_INPROGRESS) {
-        printf("[WS] DNS lookup failed: %d\n", err);
+        SINRICPRO_ERROR_PRINTF("[WS] DNS lookup failed: %d\n", err);
         ws_set_state(WS_STATE_ERROR);
         return false;
     }
@@ -182,7 +185,7 @@ void sinricpro_ws_handle(void) {
                     // Ping timeout - disconnect
                     uint32_t pong_age = now - ws_ctx.last_pong_received;
                     if (pong_age > ws_ctx.config.ping_timeout_ms) {
-                        printf("[WS] Ping timeout (%lu ms)\n", (unsigned long)pong_age);
+                        SINRICPRO_DEBUG_PRINTF("[WS] Ping timeout (%lu ms)\n", (unsigned long)pong_age);
                         sinricpro_ws_disconnect();
                     }
                 } else {
@@ -196,7 +199,7 @@ void sinricpro_ws_handle(void) {
             // Auto-reconnect
             if (ws_ctx.auto_reconnect && ws_ctx.config.host) {
                 if ((now - ws_ctx.last_disconnect_time) >= ws_ctx.reconnect_delay_ms) {
-                    printf("[WS] Attempting reconnect...\n");
+                    SINRICPRO_DEBUG_PRINTF("[WS] Attempting reconnect...\n");
                     sinricpro_ws_connect(&ws_ctx.config);
                 }
             }
@@ -222,14 +225,16 @@ bool sinricpro_ws_send(const char *message, size_t length) {
                                        ws_ctx.tx_buffer, WS_TX_BUFFER_SIZE);
 
     if (frame_len == 0) {
-        printf("[WS] Failed to encode frame\n");
+        SINRICPRO_ERROR_PRINTF("[WS] Failed to encode frame\n");
         return false;
     }
+
+    SINRICPRO_DEBUG_PRINTF("[WS TX] (%zu bytes): %.*s\n", length, (int)length, message);
 
     err_t err = altcp_write(ws_ctx.pcb, ws_ctx.tx_buffer, frame_len,
                             TCP_WRITE_FLAG_COPY);
     if (err != ERR_OK) {
-        printf("[WS] Send failed: %d\n", err);
+        SINRICPRO_ERROR_PRINTF("[WS] Send failed: %d\n", err);
         return false;
     }
 
@@ -306,12 +311,12 @@ static void ws_generate_key(char *key_out) {
 
 static void ws_dns_callback(const char *name, const ip_addr_t *addr, void *arg) {
     if (!addr) {
-        printf("[WS] DNS lookup failed for %s\n", name);
+        SINRICPRO_ERROR_PRINTF("[WS] DNS lookup failed for %s\n", name);
         ws_set_state(WS_STATE_ERROR);
         return;
     }
 
-    printf("[WS] Resolved %s to %s\n", name, ipaddr_ntoa(addr));
+    SINRICPRO_DEBUG_PRINTF("[WS] Resolved %s to %s\n", name, ipaddr_ntoa(addr));
     ip_addr_copy(ws_ctx.server_ip, *addr);
 
     // Create TCP connection
@@ -320,26 +325,26 @@ static void ws_dns_callback(const char *name, const ip_addr_t *addr, void *arg) 
     struct altcp_pcb *pcb;
 
     if (ws_ctx.config.use_ssl) {
-        printf("[WS] Create TLS PCB\n");
+        SINRICPRO_DEBUG_PRINTF("[WS] Create TLS PCB\n");
         // Create TLS PCB
         struct altcp_tls_config *tls_config = altcp_tls_create_config_client(
             NULL, 0);  // No client cert
 
         if (!tls_config) {
-            printf("[WS] Failed to create TLS config\n");
+            SINRICPRO_ERROR_PRINTF("[WS] Failed to create TLS config\n");
             ws_set_state(WS_STATE_ERROR);
             return;
         }
 
         pcb = altcp_tls_new(tls_config, IPADDR_TYPE_V4);
     } else {
-        printf("[WS] Plain TCP\n");
+        SINRICPRO_DEBUG_PRINTF("[WS] Plain TCP\n");
         // Plain TCP
         pcb = altcp_new(NULL);
     }
 
     if (!pcb) {
-        printf("[WS] Failed to create PCB\n");
+        SINRICPRO_ERROR_PRINTF("[WS] Failed to create PCB\n");
         ws_set_state(WS_STATE_ERROR);
         return;
     }
@@ -357,7 +362,7 @@ static void ws_dns_callback(const char *name, const ip_addr_t *addr, void *arg) 
                               ws_tcp_connected);
 
     if (err != ERR_OK) {
-        printf("[WS] Connect failed: %d\n", err);
+        SINRICPRO_ERROR_PRINTF("[WS] Connect failed: %d\n", err);
         altcp_close(pcb);
         ws_ctx.pcb = NULL;
         ws_set_state(WS_STATE_ERROR);
@@ -366,12 +371,12 @@ static void ws_dns_callback(const char *name, const ip_addr_t *addr, void *arg) 
 
 static err_t ws_tcp_connected(void *arg, struct altcp_pcb *pcb, err_t err) {
     if (err != ERR_OK) {
-        printf("[WS] TCP connect error: %d\n", err);
+        SINRICPRO_ERROR_PRINTF("[WS] TCP connect error: %d\n", err);
         ws_set_state(WS_STATE_ERROR);
         return err;
     }
 
-    printf("[WS] TCP connected\n");
+    SINRICPRO_DEBUG_PRINTF("[WS] TCP connected\n");
 
     if (ws_ctx.config.use_ssl) {
         ws_set_state(WS_STATE_TLS_HANDSHAKE);
@@ -424,14 +429,34 @@ static void ws_send_handshake(void) {
             "SDKVersion: %s\r\n", ws_ctx.config.sdk_version);
     }
 
+    // Add IP and MAC address (required by SinricPro server)
+    char ip_str[16];
+    char mac_str[18];
+
+    // Get IP address
+    extern struct netif *netif_default;
+    if (netif_default && netif_is_up(netif_default)) {
+        snprintf(ip_str, sizeof(ip_str), "%s", ip4addr_ntoa(netif_ip4_addr(netif_default)));
+        len += snprintf(request + len, sizeof(request) - len,
+            "ip: %s\r\n", ip_str);
+    }
+
+    // Get MAC address
+    extern cyw43_t cyw43_state;
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+             cyw43_state.mac[0], cyw43_state.mac[1], cyw43_state.mac[2],
+             cyw43_state.mac[3], cyw43_state.mac[4], cyw43_state.mac[5]);
+    len += snprintf(request + len, sizeof(request) - len,
+        "mac: %s\r\n", mac_str);
+
     len += snprintf(request + len, sizeof(request) - len, "\r\n");
 
     err_t err = altcp_write(ws_ctx.pcb, request, len, TCP_WRITE_FLAG_COPY);
     if (err == ERR_OK) {
         altcp_output(ws_ctx.pcb);
-        printf("[WS] Handshake sent\n");
+        SINRICPRO_DEBUG_PRINTF("[WS] Handshake sent\n");
     } else {
-        printf("[WS] Failed to send handshake: %d\n", err);
+        SINRICPRO_ERROR_PRINTF("[WS] Failed to send handshake: %d\n", err);
         ws_set_state(WS_STATE_ERROR);
     }
 }
@@ -439,7 +464,7 @@ static void ws_send_handshake(void) {
 static err_t ws_tcp_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t err) {
     if (!p) {
         // Connection closed
-        printf("[WS] Connection closed by server\n");
+        SINRICPRO_WARN_PRINTF("[WS] Connection closed by server\n");
         sinricpro_ws_disconnect();
         return ERR_OK;
     }
@@ -478,7 +503,7 @@ static err_t ws_tcp_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t
                 ws_ctx.handshake_complete = true;
                 ws_set_state(WS_STATE_CONNECTED);
                 ws_ctx.last_pong_received = get_millis();
-                printf("[WS] Connected!\n");
+                SINRICPRO_DEBUG_PRINTF("[WS] Connected!\n");
 
                 // Remove header from buffer
                 if (ws_ctx.rx_len > header_len) {
@@ -489,7 +514,7 @@ static err_t ws_tcp_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t
                     ws_ctx.rx_len = 0;
                 }
             } else {
-                printf("[WS] Handshake failed\n");
+                SINRICPRO_ERROR_PRINTF("[WS] Handshake failed\n");
                 ws_set_state(WS_STATE_ERROR);
                 sinricpro_ws_disconnect();
             }
@@ -504,7 +529,7 @@ static err_t ws_tcp_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t
 }
 
 static void ws_tcp_err(void *arg, err_t err) {
-    printf("[WS] TCP error: %d\n", err);
+    SINRICPRO_ERROR_PRINTF("[WS] TCP error: %d\n", err);
     ws_ctx.pcb = NULL;
     ws_ctx.last_disconnect_time = get_millis();
     ws_set_state(WS_STATE_ERROR);
@@ -518,14 +543,14 @@ static err_t ws_tcp_sent(void *arg, struct altcp_pcb *pcb, u16_t len) {
 static bool ws_parse_handshake_response(const char *response, size_t len) {
     // Check for "101 Switching Protocols"
     if (!strstr(response, "101")) {
-        printf("[WS] Server rejected upgrade: %.100s\n", response);
+        SINRICPRO_ERROR_PRINTF("[WS] Server rejected upgrade: %.100s\n", response);
         return false;
     }
 
     // Verify Sec-WebSocket-Accept
     char *accept_header = strstr(response, "Sec-WebSocket-Accept:");
     if (!accept_header) {
-        printf("[WS] Missing Sec-WebSocket-Accept header\n");
+        SINRICPRO_ERROR_PRINTF("[WS] Missing Sec-WebSocket-Accept header\n");
         return false;
     }
 
@@ -543,7 +568,7 @@ static bool ws_parse_handshake_response(const char *response, size_t len) {
 
     // Check if server accept matches
     if (!strstr(accept_header, expected_accept)) {
-        printf("[WS] Invalid Sec-WebSocket-Accept\n");
+        SINRICPRO_ERROR_PRINTF("[WS] Invalid Sec-WebSocket-Accept\n");
         return false;
     }
 
@@ -618,6 +643,11 @@ static void ws_process_frame(const uint8_t *data, size_t len) {
                     if (payload_len < sizeof(unmasked)) {
                         memcpy(unmasked, payload, payload_len);
                         unmasked[payload_len] = '\0';
+
+                        SINRICPRO_DEBUG_PRINTF("[WS RX] (%llu bytes): %.*s\n",
+                                (unsigned long long)payload_len,
+                                (int)payload_len, unmasked);
+                        
                         ws_ctx.config.on_message((const char *)unmasked,
                                                  payload_len,
                                                  ws_ctx.config.user_data);
@@ -646,7 +676,7 @@ static void ws_process_frame(const uint8_t *data, size_t len) {
                 break;
 
             case WS_OPCODE_CLOSE:
-                printf("[WS] Server sent close frame\n");
+                SINRICPRO_DEBUG_PRINTF("[WS] Server sent close frame\n");
                 sinricpro_ws_disconnect();
                 return;
 

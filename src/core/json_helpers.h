@@ -198,6 +198,15 @@ bool sinricpro_json_generate_uuid(char *output, size_t output_len);
  */
 uint32_t sinricpro_json_get_timestamp(void);
 
+/**
+ * @brief Set timestamp offset from server time
+ *
+ * Call this when the server sends a timestamp message to sync local time.
+ *
+ * @param unix_time Server's Unix timestamp
+ */
+void sinricpro_json_set_timestamp_offset(uint32_t unix_time);
+
 #ifdef __cplusplus
 }
 #endif

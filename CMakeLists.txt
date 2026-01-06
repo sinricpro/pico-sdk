@@ -34,6 +34,7 @@ endif()
 add_library(sinricpro STATIC
     # Core
     src/core/sinricpro.c
+    src/core/sinricpro_debug.c
     src/core/signature.c
     src/core/message_queue.c
     src/core/event_limiter.c

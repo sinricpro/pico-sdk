@@ -6,6 +6,7 @@
 #include "sinricpro/sinricpro_switch.h"
 #include "sinricpro/capabilities/power_state.h"
 #include "core/json_helpers.h"
+#include "core/sinricpro_debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -32,7 +33,7 @@ bool sinricpro_switch_init(sinricpro_switch_t *device, const char *device_id) {
     // Initialize capabilities
     sinricpro_power_state_init(&device->power_state);
 
-    printf("[Switch] Initialized device: %s\n", device_id);
+    SINRICPRO_DEBUG_PRINTF("[Switch] Initialized device: %s\n", device_id);
     return true;
 }
 
@@ -77,6 +78,6 @@ static bool switch_handle_request(sinricpro_device_t *device,
                                                     device, request, response);
     }
 
-    printf("[Switch] Unknown action: %s\n", action);
+    SINRICPRO_WARN_PRINTF("[Switch] Unknown action: %s\n", action);
     return false;
 }

@@ -6,6 +6,7 @@
 #include "sinricpro/capabilities/brightness.h"
 #include "sinricpro/sinricpro.h"
 #include "core/json_helpers.h"
+#include "core/sinricpro_debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -50,19 +51,19 @@ bool sinricpro_brightness_handle_set_request(sinricpro_brightness_t *cap,
     // Get value from request
     const cJSON *value = sinricpro_json_get_value(request);
     if (!value) {
-        printf("[Brightness] No value in request\n");
+        SINRICPRO_ERROR_PRINTF("[Brightness] No value in request\n");
         return false;
     }
 
     // Get brightness value
     int brightness = sinricpro_json_get_int(value, "brightness", -1);
     if (brightness < 0) {
-        printf("[Brightness] No brightness in request\n");
+        SINRICPRO_ERROR_PRINTF("[Brightness] No brightness in request\n");
         return false;
     }
 
     brightness = clamp_brightness(brightness);
-    printf("[Brightness] setBrightness: %d%%\n", brightness);
+    SINRICPRO_DEBUG_PRINTF("[Brightness] setBrightness: %d%%\n", brightness);
 
     // Call user callback
     bool success = true;
@@ -95,13 +96,13 @@ bool sinricpro_brightness_handle_adjust_request(sinricpro_brightness_t *cap,
     // Get value from request
     const cJSON *value = sinricpro_json_get_value(request);
     if (!value) {
-        printf("[Brightness] No value in request\n");
+        SINRICPRO_ERROR_PRINTF("[Brightness] No value in request\n");
         return false;
     }
 
     // Get brightness delta
     int brightness_delta = sinricpro_json_get_int(value, "brightnessDelta", 0);
-    printf("[Brightness] adjustBrightness: %+d%%\n", brightness_delta);
+    SINRICPRO_DEBUG_PRINTF("[Brightness] adjustBrightness: %+d%%\n", brightness_delta);
 
     // Call user callback or apply delta ourselves
     bool success = true;
@@ -140,7 +141,7 @@ bool sinricpro_brightness_send_event(sinricpro_brightness_t *cap,
 
     // Check rate limit
     if (sinricpro_event_limiter_check(&cap->event_limiter)) {
-        printf("[Brightness] Event rate limited\n");
+        SINRICPRO_DEBUG_PRINTF("[Brightness] Event rate limited\n");
         return false;
     }
 
@@ -159,7 +160,7 @@ bool sinricpro_brightness_send_event(sinricpro_brightness_t *cap,
 
     if (result) {
         cap->current_brightness = brightness;
-        printf("[Brightness] Sent event: %d%%\n", brightness);
+        SINRICPRO_DEBUG_PRINTF("[Brightness] Sent event: %d%%\n", brightness);
     }
 
     return result;

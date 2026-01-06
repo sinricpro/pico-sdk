@@ -7,6 +7,7 @@
 #include "sinricpro/capabilities/power_state.h"
 #include "sinricpro/capabilities/brightness.h"
 #include "core/json_helpers.h"
+#include "core/sinricpro_debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -34,7 +35,7 @@ bool sinricpro_dimswitch_init(sinricpro_dimswitch_t *device, const char *device_
     sinricpro_power_state_init(&device->power_state);
     sinricpro_brightness_init(&device->brightness);
 
-    printf("[DimSwitch] Initialized device: %s\n", device_id);
+    SINRICPRO_DEBUG_PRINTF("[DimSwitch] Initialized device: %s\n", device_id);
     return true;
 }
 
@@ -121,6 +122,6 @@ static bool dimswitch_handle_request(sinricpro_device_t *device,
                                                           device, request, response);
     }
 
-    printf("[DimSwitch] Unknown action: %s\n", action);
+    SINRICPRO_WARN_PRINTF("[DimSwitch] Unknown action: %s\n", action);
     return false;
 }

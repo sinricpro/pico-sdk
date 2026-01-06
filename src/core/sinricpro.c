@@ -9,6 +9,7 @@
 #include "core/message_queue.h"
 #include "core/signature.h"
 #include "core/json_helpers.h"
+#include "core/sinricpro_debug.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -57,37 +58,29 @@ static void update_device_ids_header(void);
 static void set_state(sinricpro_state_t new_state);
 
 bool sinricpro_init(const sinricpro_config_t *config) {
-    if (!config || !config->app_key || !config->app_secret ||
-        !config->wifi_ssid || !config->wifi_password) {
-        printf("[SinricPro] Invalid configuration\n");
+    if (!config || !config->app_key || !config->app_secret) {
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Invalid configuration\n");
         return false;
     }
-
-    // Initialize Pico stdio
-    stdio_init_all();
-
-    // Initialize cyw43 (WiFi driver)
-    if (cyw43_arch_init()) {
-        printf("[SinricPro] Failed to initialize cyw43\n");
-        return false;
-    }
-
-    // Enable station mode
-    cyw43_arch_enable_sta_mode();
 
     // Store configuration
     memset(&ctx, 0, sizeof(ctx));
     memcpy(&ctx.config, config, sizeof(sinricpro_config_t));
 
+    // Set debug mode globally
+    sinricpro_debug_set_enabled(ctx.config.enable_debug);
+
     // Apply defaults
     if (!ctx.config.server_url) {
         ctx.config.server_url = SINRICPRO_SERVER_URL;
     }
-    if (ctx.config.server_port == 0) {
-        ctx.config.server_port = SINRICPRO_SERVER_PORT;
-    } 
 
-    ctx.config.use_ssl = config->use_ssl;
+    // Set port based on use_ssl if not explicitly set
+    // use_ssl in config struct is the authoritative source
+    if (ctx.config.server_port == 0) {
+        // Port not set, derive from use_ssl
+        ctx.config.server_port = ctx.config.use_ssl ? 443 : 80;
+    }
 
     if (ctx.config.connect_timeout_ms == 0) {
         ctx.config.connect_timeout_ms = 30000;
@@ -109,43 +102,36 @@ bool sinricpro_init(const sinricpro_config_t *config) {
     ctx.state = SINRICPRO_STATE_DISCONNECTED;
     sdk_initialized = true;
 
-    printf("[SinricPro] SDK v%s initialized\n", SINRICPRO_SDK_VERSION);
+    SINRICPRO_DEBUG_PRINTF("[SinricPro] Use SSL? %s\n", ctx.config.use_ssl ? "Yes" : "No");
+    SINRICPRO_DEBUG_PRINTF("[SinricPro] SDK v%s initialized\n", SINRICPRO_SDK_VERSION);
     return true;
 }
 
 bool sinricpro_begin(void) {
     if (!sdk_initialized) {
-        printf("[SinricPro] SDK not initialized\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] SDK not initialized\n");
         return false;
     }
 
     if (ctx.device_count == 0) {
-        printf("[SinricPro] No devices registered\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] No devices registered\n");
         return false;
     }
 
-    // Update device IDs header
-    update_device_ids_header();
-
-    // Connect to WiFi
-    set_state(SINRICPRO_STATE_WIFI_CONNECTING);
-    printf("[SinricPro] Connecting to WiFi: %s\n", ctx.config.wifi_ssid);
-
-    int result = cyw43_arch_wifi_connect_timeout_ms(
-        ctx.config.wifi_ssid,
-        ctx.config.wifi_password,
-        CYW43_AUTH_WPA2_AES_PSK,
-        ctx.config.connect_timeout_ms);
-
-    if (result != 0) {
-        printf("[SinricPro] WiFi connection failed: %d\n", result);
+    // Check if WiFi is already connected
+    int wifi_status = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+    if (wifi_status != CYW43_LINK_UP) {
+        SINRICPRO_ERROR_PRINTF("[SinricPro] WiFi not connected. Connect to WiFi before calling sinricpro_begin()\n");
         set_state(SINRICPRO_STATE_ERROR);
         return false;
     }
 
     ctx.wifi_connected = true;
     set_state(SINRICPRO_STATE_WIFI_CONNECTED);
-    printf("[SinricPro] WiFi connected\n");
+    SINRICPRO_DEBUG_PRINTF("[SinricPro] WiFi already connected\n");
+
+    // Update device IDs header
+    update_device_ids_header();
 
     // Connect WebSocket
     set_state(SINRICPRO_STATE_WS_CONNECTING);
@@ -164,7 +150,8 @@ bool sinricpro_begin(void) {
         .user_data = NULL,
         .connect_timeout_ms = ctx.config.connect_timeout_ms,
         .ping_interval_ms = ctx.config.ping_interval_ms,
-        .ping_timeout_ms = SINRICPRO_WEBSOCKET_PING_TIMEOUT_MS
+        .ping_timeout_ms = SINRICPRO_WEBSOCKET_PING_TIMEOUT_MS,
+        .enable_debug = ctx.config.enable_debug
     };
 
     return sinricpro_ws_connect(&ws_config);
@@ -215,13 +202,13 @@ bool sinricpro_add_device(sinricpro_device_t *device) {
     // Check for duplicate
     for (size_t i = 0; i < ctx.device_count; i++) {
         if (strcmp(ctx.devices[i]->device_id, device->device_id) == 0) {
-            printf("[SinricPro] Device %s already registered\n", device->device_id);
+            SINRICPRO_WARN_PRINTF("[SinricPro] Device %s already registered\n", device->device_id);
             return false;
         }
     }
 
     ctx.devices[ctx.device_count++] = device;
-    printf("[SinricPro] Added device: %s\n", device->device_id);
+    SINRICPRO_DEBUG_PRINTF("[SinricPro] Added device: %s\n", device->device_id);
 
     return true;
 }
@@ -336,7 +323,7 @@ static void on_ws_state(sinricpro_ws_state_t ws_state, void *user_data) {
     switch (ws_state) {
         case WS_STATE_CONNECTED:
             set_state(SINRICPRO_STATE_CONNECTED);
-            printf("[SinricPro] Connected to server\n");
+            SINRICPRO_DEBUG_PRINTF("[SinricPro] Connected to server\n");
             break;
 
         case WS_STATE_DISCONNECTED:
@@ -357,15 +344,26 @@ static void process_incoming_message(const char *message, size_t length) {
     // Parse JSON
     cJSON *json = cJSON_ParseWithLength(message, length);
     if (!json) {
-        printf("[SinricPro] Failed to parse message\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Failed to parse message\n");
         return;
     }
 
-    // Verify signature
+    // Check for timestamp message from server (sent on connect)
+    // Format: {"timestamp": 1767667003}
+    cJSON *timestamp_item = cJSON_GetObjectItem(json, "timestamp");
+    if (timestamp_item && cJSON_IsNumber(timestamp_item)) {
+        uint32_t server_timestamp = (uint32_t)cJSON_GetNumberValue(timestamp_item);
+        sinricpro_json_set_timestamp_offset(server_timestamp);
+        SINRICPRO_DEBUG_PRINTF("[SinricPro] Server time synced: %lu\n", (unsigned long)server_timestamp);
+        cJSON_Delete(json);
+        return;
+    }
+
+    // Verify signature for normal messages
     const char *signature = sinricpro_json_get_signature(json);
     if (!signature || !sinricpro_verify_signature(ctx.config.app_secret,
                                                    message, signature)) {
-        printf("[SinricPro] Invalid signature\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Invalid signature\n");
         cJSON_Delete(json);
         return;
     }
@@ -390,23 +388,23 @@ static void process_request(cJSON *message) {
     const char *action = sinricpro_json_get_action(message);
 
     if (!device_id || !action) {
-        printf("[SinricPro] Invalid request: missing deviceId or action\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Invalid request: missing deviceId or action\n");
         return;
     }
 
-    printf("[SinricPro] Request: %s -> %s\n", device_id, action);
+    SINRICPRO_DEBUG_PRINTF("[SinricPro] Request: %s -> %s\n", device_id, action);
 
     // Find device
     sinricpro_device_t *device = sinricpro_find_device(device_id);
     if (!device) {
-        printf("[SinricPro] Device not found: %s\n", device_id);
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Device not found: %s\n", device_id);
         return;
     }
 
     // Create response
     cJSON *response = sinricpro_json_create_response(message, false);
     if (!response) {
-        printf("[SinricPro] Failed to create response\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Failed to create response\n");
         return;
     }
 
@@ -438,7 +436,7 @@ static bool send_message(cJSON *message) {
     size_t payload_len = sinricpro_json_serialize_payload(message, payload_str,
                                                           sizeof(payload_str));
     if (payload_len == 0) {
-        printf("[SinricPro] Failed to serialize payload\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Failed to serialize payload\n");
         return false;
     }
 
@@ -446,7 +444,7 @@ static bool send_message(cJSON *message) {
     char signature[SINRICPRO_SIGNATURE_MAX_LEN];
     if (!sinricpro_calculate_signature(ctx.config.app_secret, payload_str,
                                        signature, sizeof(signature))) {
-        printf("[SinricPro] Failed to calculate signature\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Failed to calculate signature\n");
         return false;
     }
 
@@ -458,7 +456,7 @@ static bool send_message(cJSON *message) {
     size_t message_len = sinricpro_json_serialize(message, message_str,
                                                    sizeof(message_str));
     if (message_len == 0) {
-        printf("[SinricPro] Failed to serialize message\n");
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Failed to serialize message\n");
         return false;
     }
 
@@ -474,7 +472,7 @@ bool sinricpro_device_init(sinricpro_device_t *device,
     if (!device || !device_id) return false;
 
     if (strlen(device_id) != SINRICPRO_DEVICE_ID_LENGTH) {
-        printf("[SinricPro] Invalid device ID length: %s\n", device_id);
+        SINRICPRO_ERROR_PRINTF("[SinricPro] Invalid device ID length: %s\n", device_id);
         return false;
     }
 

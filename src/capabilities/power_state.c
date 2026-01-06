@@ -6,6 +6,7 @@
 #include "sinricpro/capabilities/power_state.h"
 #include "sinricpro/sinricpro.h"
 #include "core/json_helpers.h"
+#include "core/sinricpro_debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -35,21 +36,21 @@ bool sinricpro_power_state_handle_request(sinricpro_power_state_t *cap,
     // Get value from request
     const cJSON *value = sinricpro_json_get_value(request);
     if (!value) {
-        printf("[PowerState] No value in request\n");
+        SINRICPRO_ERROR_PRINTF("[PowerState] No value in request\n");
         return false;
     }
 
     // Get state string (SinricPro uses "On"/"Off")
     const char *state_str = sinricpro_json_get_string(value, "state", NULL);
     if (!state_str) {
-        printf("[PowerState] No state in request\n");
+        SINRICPRO_ERROR_PRINTF("[PowerState] No state in request\n");
         return false;
     }
 
     // Parse state
     bool new_state = (strcasecmp(state_str, "On") == 0);
 
-    printf("[PowerState] setPowerState: %s\n", new_state ? "ON" : "OFF");
+    SINRICPRO_DEBUG_PRINTF("[PowerState] setPowerState: %s\n", new_state ? "ON" : "OFF");
 
     // Call user callback
     bool success = true;
@@ -79,7 +80,7 @@ bool sinricpro_power_state_send_event(sinricpro_power_state_t *cap,
 
     // Check rate limit
     if (sinricpro_event_limiter_check(&cap->event_limiter)) {
-        printf("[PowerState] Event rate limited\n");
+        SINRICPRO_DEBUG_PRINTF("[PowerState] Event rate limited\n");
         return false;
     }
 
@@ -96,7 +97,7 @@ bool sinricpro_power_state_send_event(sinricpro_power_state_t *cap,
 
     if (result) {
         cap->current_state = state;
-        printf("[PowerState] Sent event: %s\n", state ? "ON" : "OFF");
+        SINRICPRO_DEBUG_PRINTF("[PowerState] Sent event: %s\n", state ? "ON" : "OFF");
     }
 
     return result;
