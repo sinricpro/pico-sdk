@@ -1,0 +1,82 @@
+name: Build Examples
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Cache pico-sdk
+      id: cache-pico-sdk
+      uses: actions/cache@v4
+      with:
+        path: ~/pico-sdk
+        key: ${{ runner.os }}-pico-sdk-2.2.0
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+
+    - name: Clone pico-sdk
+      if: steps.cache-pico-sdk.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        git clone https://github.com/raspberrypi/pico-sdk.git --branch 2.2.0 --depth 1
+        cd pico-sdk
+        git submodule update --init
+
+    - name: Initialize cJSON submodule
+      run: |
+        if [ ! -d "lib/cJSON/.git" ]; then
+          git submodule add https://github.com/DaveGamble/cJSON.git lib/cJSON || true
+        fi
+        git submodule update --init --recursive
+
+    - name: Configure CMake
+      run: |
+        export PICO_SDK_PATH=~/pico-sdk
+        cmake -B build -DPICO_BOARD=pico_w
+
+    - name: Build all examples
+      run: |
+        export PICO_SDK_PATH=~/pico-sdk
+        cmake --build build -j$(nproc)
+
+    - name: List built artifacts
+      run: |
+        echo "=== Built Examples ==="
+        find build/examples -name "*.uf2" -o -name "*.elf" | sort
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pico-w-examples
+        path: |
+          build/examples/**/*.uf2
+          build/examples/**/*.elf
+        retention-days: 30
+
+    - name: Build summary
+      run: |
+        echo "## Build Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Successfully built the following examples:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        for uf2 in $(find build/examples -name "*.uf2" | sort); do
+          size=$(stat -f%z "$uf2" 2>/dev/null || stat -c%s "$uf2")
+          size_kb=$((size / 1024))
+          name=$(basename "$uf2" .uf2)
+          echo "- ✅ **$name** (${size_kb}KB)" >> $GITHUB_STEP_SUMMARY
+        done

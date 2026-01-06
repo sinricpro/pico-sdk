@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+
+    - name: Clone pico-sdk
+      run: |
+        cd ~
+        git clone https://github.com/raspberrypi/pico-sdk.git --branch 2.2.0 --depth 1
+        cd pico-sdk
+        git submodule update --init
+
+    - name: Initialize cJSON submodule
+      run: |
+        if [ ! -d "lib/cJSON/.git" ]; then
+          git submodule add https://github.com/DaveGamble/cJSON.git lib/cJSON || true
+        fi
+        git submodule update --init --recursive
+
+    - name: Build all examples
+      run: |
+        export PICO_SDK_PATH=~/pico-sdk
+        cmake -B build -DPICO_BOARD=pico_w -DCMAKE_BUILD_TYPE=Release
+        cmake --build build -j$(nproc)
+
+    - name: Package examples
+      run: |
+        mkdir -p release/examples
+        find build/examples -name "*.uf2" -exec cp {} release/examples/ \;
+        cd release
+        tar -czf sinricpro-pico-examples.tar.gz examples/
+        zip -r sinricpro-pico-examples.zip examples/
+
+    - name: Create checksums
+      run: |
+        cd release
+        sha256sum sinricpro-pico-examples.tar.gz > checksums.txt
+        sha256sum sinricpro-pico-examples.zip >> checksums.txt
+
+    - name: Upload to release
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release/sinricpro-pico-examples.tar.gz
+          release/sinricpro-pico-examples.zip
+          release/checksums.txt
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload artifacts (manual trigger)
+      if: github.event_name == 'workflow_dispatch'
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-packages
+        path: |
+          release/sinricpro-pico-examples.tar.gz
+          release/sinricpro-pico-examples.zip
+          release/checksums.txt
+        retention-days: 90

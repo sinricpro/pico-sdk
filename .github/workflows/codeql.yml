@@ -1,0 +1,61 @@
+name: CodeQL Security Analysis
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  schedule:
+    # Run every Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze C/C++ code
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: cpp
+        queries: security-and-quality
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+
+    - name: Clone pico-sdk
+      run: |
+        cd ~
+        git clone https://github.com/raspberrypi/pico-sdk.git --branch 2.2.0 --depth 1
+        cd pico-sdk
+        git submodule update --init
+
+    - name: Initialize cJSON submodule
+      run: |
+        if [ ! -d "lib/cJSON/.git" ]; then
+          git submodule add https://github.com/DaveGamble/cJSON.git lib/cJSON || true
+        fi
+        git submodule update --init --recursive
+
+    - name: Build
+      run: |
+        export PICO_SDK_PATH=~/pico-sdk
+        cmake -B build -DPICO_BOARD=pico_w
+        cmake --build build -j$(nproc)
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:cpp"
