@@ -75,9 +75,7 @@ bool on_power_state(sinricpro_device_t *device, bool *state) {
 int main() {
     sinricpro_config_t config = {
         .app_key = "your-app-key",
-        .app_secret = "your-app-secret",
-        .wifi_ssid = "YourNetwork",
-        .wifi_password = "YourPassword"
+        .app_secret = "your-app-secret"
     };
 
     sinricpro_init(&config);
