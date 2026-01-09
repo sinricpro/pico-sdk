@@ -22,17 +22,48 @@ Native C SDK for connecting Raspberry Pi Pico W devices to [SinricPro](https://s
   - Brightness adjustment (0-100%)
   - RGB color (0-255 per channel)
   - Color temperature (2200K-7000K warm to cool white)
+- **Fan** - Speed control for fans and ventilation systems
+  - On/off control
+  - Speed adjustment (0-100%)
+- **Lock** - Smart lock control for doors and access control
+  - Lock/unlock commands
+  - Status reporting (LOCKED/UNLOCKED/JAMMED)
+- **GarageDoor** - Garage door opener control
+  - Open/close commands
+  - Position status monitoring
+- **Blinds** - Motorized blinds/shades position control
+  - Position control (0-100%, where 0=fully open, 100=fully closed)
+  - Relative adjustments ("open blinds 30 percent")
 
 ### Sensors
 - **Motion Sensor** - PIR motion detection for automation and security
 - **Temperature Sensor** - Temperature and humidity monitoring
 - **Contact Sensor** - Door/window open/close detection
+- **PowerSensor** - Real-time power consumption monitoring
+  - Voltage, current, power measurements
+  - Watt-hours energy tracking
+  - Power factor calculation
+- **AirQualitySensor** - Air quality monitoring
+  - PM1.0, PM2.5, PM10 particulate matter detection
+  - Air quality index (AQI) reporting
+
+### Event Devices
+- **Doorbell** - Doorbell press notifications
+  - Push notifications on doorbell press
+  - Automation triggers
 
 All devices support:
 - Voice control via Alexa and Google Home
 - SinricPro mobile app integration
 - Alexa routines and automations
 - Real-time status updates
+
+### Future Device Support
+The following complex devices require additional capabilities and are planned for future releases:
+- **TV** - Television control (requires 8 capabilities)
+- **Speaker** - Smart speaker control (requires 7 capabilities)
+- **WindowAC** - Window air conditioner control (requires 5 capabilities)
+- **Camera** - IP camera streaming (requires specialized camera capabilities)
 
 ## Documentation
 
@@ -119,12 +150,24 @@ int main() {
 
 The SDK includes complete examples for all device types:
 
+### Actuators
 - **`examples/switch/`** - Basic on/off relay control
 - **`examples/dimswitch/`** - Dimmable LED with PWM control
 - **`examples/light/`** - RGB+CCT LED strip with full color control
+- **`examples/fan/`** - PWM fan speed control with automatic cycling
+- **`examples/lock/`** - Solenoid lock control with manual unlock button
+- **`examples/garagedoor/`** - Garage door relay control with position sensor
+- **`examples/blinds/`** - Motorized blinds with time-based position tracking
+
+### Sensors
 - **`examples/motion_sensor/`** - PIR motion detection
 - **`examples/temperature_sensor/`** - Temperature/humidity monitoring (uses built-in RP2040 sensor)
 - **`examples/contact_sensor/`** - Door/window sensor with magnetic reed switch
+- **`examples/powersensor/`** - Real-time power monitoring with ADC voltage/current sensing
+- **`examples/airqualitysensor/`** - Air quality monitoring with I2C PM sensor
+
+### Event Devices
+- **`examples/doorbell/`** - Doorbell button with buzzer chime
 
 Each example includes:
 - Complete working code with detailed comments

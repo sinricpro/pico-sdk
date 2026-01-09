@@ -50,6 +50,12 @@ add_library(sinricpro STATIC
     src/capabilities/motion_sensor.c
     src/capabilities/temperature_sensor.c
     src/capabilities/contact_sensor.c
+    src/capabilities/lock_controller.c
+    src/capabilities/doorbell.c
+    src/capabilities/door_controller.c
+    src/capabilities/power_sensor.c
+    src/capabilities/air_quality_sensor.c
+    src/capabilities/range_controller.c
 
     # Devices
     src/devices/sinricpro_switch.c
@@ -58,6 +64,13 @@ add_library(sinricpro STATIC
     src/devices/sinricpro_motion_sensor.c
     src/devices/sinricpro_temperature_sensor.c
     src/devices/sinricpro_contact_sensor.c
+    src/devices/sinricpro_fan.c
+    src/devices/sinricpro_lock.c
+    src/devices/sinricpro_doorbell.c
+    src/devices/sinricpro_garagedoor.c
+    src/devices/sinricpro_powersensor.c
+    src/devices/sinricpro_airqualitysensor.c
+    src/devices/sinricpro_blinds.c
 )
 
 target_include_directories(sinricpro PUBLIC
@@ -94,6 +107,13 @@ if(SINRICPRO_BUILD_EXAMPLES)
     add_subdirectory(examples/motion_sensor)
     add_subdirectory(examples/temperature_sensor)
     add_subdirectory(examples/contact_sensor)
+    add_subdirectory(examples/fan)
+    add_subdirectory(examples/lock)
+    add_subdirectory(examples/doorbell)
+    add_subdirectory(examples/garagedoor)
+    add_subdirectory(examples/powersensor)
+    add_subdirectory(examples/airqualitysensor)
+    add_subdirectory(examples/blinds)
 endif()
 
 # =============================================================================
