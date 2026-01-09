@@ -1,20 +1,22 @@
 /**
  * @file main.c
- * @brief SinricPro DimSwitch Example for Raspberry Pi Pico W
+ * @brief SinricPro Doorbell Example for Raspberry Pi Pico W
  *
- * This example demonstrates how to create a dimmable smart switch
- * that can be controlled via Alexa, Google Home, or the SinricPro app.
+ * This example demonstrates how to create a smart doorbell device
+ * that sends notifications via Alexa, Google Home, or the SinricPro app.
  *
  * Hardware:
  * - Raspberry Pi Pico W
- * - LED connected to GPIO 15 (PWM output for dimming)
- * - Button connected to GPIO 14 (optional)
+ * - Doorbell button connected to GPIO 14
+ * - Optional: buzzer/chime connected to GPIO 15
+ * - Optional: LED indicator on GPIO 13
  *
- * Voice Commands:
- * - "Alexa, turn on [device name]"
- * - "Alexa, set [device name] to 50 percent"
- * - "Alexa, dim [device name]"
- * - "Alexa, brighten [device name]"
+ * Setup:
+ * 1. Create a "Doorbell" or "Contact Sensor" device on sinric.pro
+ * 2. Update WIFI_SSID, WIFI_PASSWORD, APP_KEY, APP_SECRET, DEVICE_ID
+ * 3. Build and flash to your Pico W
+ * 4. Enable notifications in Alexa/Google Home app
+ * 5. Press the doorbell button to trigger notifications
  *
  * Connection Mode:
  * - Default: Secure mode (WSS on port 443) with TLS encryption
@@ -25,17 +27,16 @@
 #define SINRICPRO_NOSSL
 
 // Uncomment the following line to enable/disable sdk debug output
-// #define ENABLE_DEBUG
+#define ENABLE_DEBUG
 
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "hardware/gpio.h"
-#include "hardware/pwm.h"
 
 #include "sinricpro/sinricpro.h"
-#include "sinricpro/sinricpro_dimswitch.h"
+#include "sinricpro/sinricpro_doorbell.h"
 
 // =============================================================================
 // Configuration - UPDATE THESE VALUES
@@ -53,155 +54,21 @@
 // Hardware Configuration
 // =============================================================================
 
-#define LED_PIN         15  // GPIO for PWM LED output
-#define BUTTON_PIN      14  // GPIO for physical button input
-#define DEBOUNCE_MS     50  // Button debounce time
-
-// PWM configuration
-#define PWM_WRAP        255 // PWM resolution (8-bit)
+#define BUTTON_PIN      14  // GPIO for doorbell button
+#define BUZZER_PIN      15  // GPIO for buzzer/chime (optional)
+#define LED_PIN         13  // GPIO for status LED (optional)
+#define DEBOUNCE_MS     500 // Button debounce time (longer to prevent spamming)
 
 // =============================================================================
 // Global Variables
 // =============================================================================
 
-static sinricpro_dimswitch_t my_dimmer;
-static bool current_power_state = false;
-static int current_power_level = 100;  // Default 100%
+static sinricpro_doorbell_t my_doorbell;
 static uint32_t last_button_press = 0;
-static uint pwm_slice;
-
-// =============================================================================
-// Hardware Functions
-// =============================================================================
-
-/**
- * @brief Initialize PWM for LED dimming
- */
-void init_pwm(void) {
-    gpio_set_function(LED_PIN, GPIO_FUNC_PWM);
-    pwm_slice = pwm_gpio_to_slice_num(LED_PIN);
-
-    pwm_config config = pwm_get_default_config();
-    pwm_config_set_wrap(&config, PWM_WRAP);
-    pwm_init(pwm_slice, &config, true);
-
-    pwm_set_gpio_level(LED_PIN, 0);
-}
-
-/**
- * @brief Set LED brightness
- *
- * @param brightness 0-100 percentage
- */
-void set_led_brightness(int brightness) {
-    // Convert 0-100% to 0-255 PWM value
-    uint16_t pwm_value = (brightness * PWM_WRAP) / 100;
-    pwm_set_gpio_level(LED_PIN, pwm_value);
-}
-
-/**
- * @brief Update LED output based on power state and power level
- */
-void update_led(void) {
-    if (current_power_state) {
-        set_led_brightness(current_power_level);
-    } else {
-        set_led_brightness(0);
-    }
-}
-
-/**
- * @brief Initialize GPIO pins
- */
-void init_hardware(void) {
-    // Initialize PWM for LED
-    init_pwm();
-
-    // Initialize button input with pull-up
-    gpio_init(BUTTON_PIN);
-    gpio_set_dir(BUTTON_PIN, GPIO_IN);
-    gpio_pull_up(BUTTON_PIN);
-}
-
-/**
- * @brief Check for button press with debouncing
- */
-bool check_button(void) {
-    static bool last_state = true;  // Pull-up means high when not pressed
-
-    bool button_state = gpio_get(BUTTON_PIN);
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-
-    // Check for falling edge (button pressed) with debounce
-    if (!button_state && last_state && (now - last_button_press > DEBOUNCE_MS)) {
-        last_button_press = now;
-        last_state = button_state;
-        return true;
-    }
-
-    last_state = button_state;
-    return false;
-}
 
 // =============================================================================
 // Callbacks
 // =============================================================================
-
-/**
- * @brief Handle power state change from cloud
- */
-bool on_power_state(sinricpro_device_t *device, bool *state) {
-    printf("[Callback] Power state: %s\n", *state ? "ON" : "OFF");
-
-    current_power_state = *state;
-    update_led();
-
-    return true;
-}
-
-/**
- * @brief Handle power level change from cloud
- */
-bool on_power_level(sinricpro_device_t *device, int *power_level) {
-    printf("[Callback] Power level: %d%%\n", *power_level);
-
-    current_power_level = *power_level;
-
-    // If power level is set while off, turn on
-    if (current_power_level > 0 && !current_power_state) {
-        current_power_state = true;
-    }
-
-    update_led();
-
-    return true;
-}
-
-/**
- * @brief Handle adjust power level from cloud (dim/brighten commands)
- */
-bool on_adjust_power_level(sinricpro_device_t *device, int *power_level_delta) {
-    printf("[Callback] Adjust power level: %+d%%\n", *power_level_delta);
-
-    // Apply delta to current power level
-    current_power_level += *power_level_delta;
-
-    // Clamp to 0-100
-    if (current_power_level < 0) current_power_level = 0;
-    if (current_power_level > 100) current_power_level = 100;
-
-    // Return absolute power level
-    *power_level_delta = current_power_level;
-
-    // Turn on if adjusting while off
-    if (current_power_level > 0 && !current_power_state) {
-        current_power_state = true;
-    }
-
-    update_led();
-
-    return true;
-}
 
 /**
  * @brief Connection state change callback
@@ -230,16 +97,68 @@ void on_state_change(sinricpro_state_t state, void *user_data) {
 }
 
 // =============================================================================
+// Hardware Functions
+// =============================================================================
+
+/**
+ * @brief Initialize GPIO pins
+ */
+void init_hardware(void) {
+    // Initialize button input with pull-up
+    gpio_init(BUTTON_PIN);
+    gpio_set_dir(BUTTON_PIN, GPIO_IN);
+    gpio_pull_up(BUTTON_PIN);
+
+    // Initialize LED output
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_put(LED_PIN, false);
+
+    // Initialize buzzer output (optional)
+    gpio_init(BUZZER_PIN);
+    gpio_set_dir(BUZZER_PIN, GPIO_OUT);
+    gpio_put(BUZZER_PIN, false);
+}
+
+/**
+ * @brief Check for button press with debouncing
+ */
+bool check_button(void) {
+    static bool last_state = true;  // Pull-up means high when not pressed
+
+    bool button_state = gpio_get(BUTTON_PIN);
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+
+    // Check for falling edge (button pressed) with debounce
+    if (!button_state && last_state && (now - last_button_press > DEBOUNCE_MS)) {
+        last_button_press = now;
+        last_state = button_state;
+        return true;
+    }
+
+    last_state = button_state;
+    return false;
+}
+
+/**
+ * @brief Sound the buzzer/chime
+ */
+void sound_chime(void) {
+    // Simple beep pattern
+    for (int i = 0; i < 3; i++) {
+        gpio_put(BUZZER_PIN, true);
+        sleep_ms(100);
+        gpio_put(BUZZER_PIN, false);
+        sleep_ms(100);
+    }
+}
+
+// =============================================================================
 // WiFi Functions
 // =============================================================================
 
 /**
  * @brief Connect to WiFi network
- *
- * Initializes the WiFi hardware and connects to the specified network.
- * This must be called before sinricpro_begin().
- *
- * @return true if connected successfully, false on error
  */
 bool connect_wifi(void) {
     printf("[1/4] Initializing WiFi...\n");
@@ -279,16 +198,13 @@ int main() {
 
     printf("\n");
     printf("================================================\n");
-    printf("SinricPro DimSwitch Example for Pico W\n");
+    printf("SinricPro Doorbell Example for Pico W\n");
     printf("================================================\n\n");
 
     // Initialize hardware
     init_hardware();
 
-    // =============================================================================
-    // Step 1: Connect to WiFi (user responsibility)
-    // =============================================================================
-
+    // Connect to WiFi
     if (!connect_wifi()) {
         // Blink LED rapidly on WiFi error
         while (1) {
@@ -300,7 +216,7 @@ int main() {
     }
 
     // =============================================================================
-    // Step 2: Initialize SinricPro SDK
+    // Initialize SinricPro SDK
     // =============================================================================
 
     printf("[3/4] Initializing SinricPro SDK...\n");
@@ -319,6 +235,7 @@ int main() {
 #else
         .enable_debug = false
 #endif
+
     };
 
     if (!sinricpro_init(&config)) {
@@ -329,25 +246,20 @@ int main() {
     // Set state change callback
     sinricpro_on_state_change(on_state_change, NULL);
 
-    // Initialize dimswitch device
-    if (!sinricpro_dimswitch_init(&my_dimmer, DEVICE_ID)) {
-        printf("ERROR: Failed to initialize dimswitch device\n");
+    // Initialize doorbell device
+    if (!sinricpro_doorbell_init(&my_doorbell, DEVICE_ID)) {
+        printf("ERROR: Failed to initialize doorbell device\n");
         return 1;
     }
 
-    // Set callbacks
-    sinricpro_dimswitch_on_power_state(&my_dimmer, on_power_state);
-    sinricpro_dimswitch_on_power_level(&my_dimmer, on_power_level);
-    sinricpro_dimswitch_on_adjust_power_level(&my_dimmer, on_adjust_power_level);
-
     // Add device to SinricPro
-    if (!sinricpro_add_device((sinricpro_device_t *)&my_dimmer)) {
+    if (!sinricpro_add_device((sinricpro_device_t *)&my_doorbell)) {
         printf("ERROR: Failed to add device\n");
         return 1;
     }
 
     // =============================================================================
-    // Step 3: Connect to SinricPro Server
+    // Connect to SinricPro Server
     // =============================================================================
 
     printf("[4/4] Connecting to SinricPro...\n");
@@ -358,39 +270,46 @@ int main() {
 
     printf("\n");
     printf("================================================\n");
-    printf("Ready! Voice commands:\n");
-    printf("  'Alexa, turn on [device name]'\n");
-    printf("  'Alexa, turn off [device name]'\n");
-    printf("  'Alexa, set [device name] to 50 percent'\n");
-    printf("  'Alexa, dim [device name]'\n");
-    printf("  'Alexa, brighten [device name]'\n");
+    printf("Ready! Doorbell is active.\n");
+    printf("Press the button to send a notification.\n");
     printf("\n");
-    printf("Press button to toggle power.\n");
+    printf("Enable notifications in your Alexa/Google app\n");
+    printf("to receive doorbell alerts.\n");
     printf("================================================\n\n");
 
     // Main loop
     while (1) {
+        // Get current time
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+
         // Process SinricPro events
         sinricpro_handle();
 
-        // Check for physical button press
+        // Check for doorbell button press
         if (check_button()) {
-            // Toggle power state
-            current_power_state = !current_power_state;
-            update_led();
+            printf("[Doorbell] Button pressed!\n");
 
-            printf("[Button] Power: %s (power level: %d%%)\n",
-                   current_power_state ? "ON" : "OFF", current_power_level);
+            // Flash LED
+            gpio_put(LED_PIN, true);
 
-            // Send event to cloud
+            // Sound the chime
+            sound_chime();
+
+            // Send event to cloud (triggers notifications)
             if (sinricpro_is_connected()) {
-                sinricpro_dimswitch_send_power_state_event(&my_dimmer, current_power_state);
+                if (sinricpro_doorbell_send_press_event(&my_doorbell)) {
+                    printf("[Doorbell] Event sent successfully\n");
+                } else {
+                    printf("[Doorbell] Failed to send event\n");
+                }
             }
+
+            // Turn off LED
+            gpio_put(LED_PIN, false);
         }
 
         // Blink onboard LED when connected
         static uint32_t last_blink = 0;
-        uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_blink > 1000) {
             last_blink = now;
             if (sinricpro_is_connected()) {

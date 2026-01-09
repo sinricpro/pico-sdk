@@ -1,20 +1,39 @@
 /**
  * @file main.c
- * @brief SinricPro Switch Example for Raspberry Pi Pico W
+ * @brief SinricPro Garage Door Example for Raspberry Pi Pico W
  *
- * This example demonstrates how to create a simple smart switch
+ * This example demonstrates how to create a smart garage door opener
  * that can be controlled via Alexa, Google Home, or the SinricPro app.
  *
  * Hardware:
  * - Raspberry Pi Pico W
- * - LED or relay connected to GPIO 15 (optional)
- * - Button connected to GPIO 14 (optional)
+ * - Relay module connected to GPIO 15 (to trigger garage door opener)
+ * - Door position sensor connected to GPIO 14 (to detect open/closed state)
+ * - Button connected to GPIO 13 (for manual control)
+ *
+ * Wiring for Relay-Based Garage Door Opener:
+ * ┌─────────────────────────────────────────────────────────┐
+ * │ Pico W          Relay Module       Garage Door Opener   │
+ * │ GPIO 15 ───────> IN                                      │
+ * │ GND ───────────> GND                                     │
+ * │ VBUS (5V) ─────> VCC                                     │
+ * │                  COM ──────────────> Terminal 1          │
+ * │                  NO ───────────────> Terminal 2          │
+ * │                                                           │
+ * │ Note: Relay simulates pressing the wall button by       │
+ * │       momentarily closing the circuit (200ms pulse)      │
+ * └─────────────────────────────────────────────────────────┘
+ *
+ * Door Position Sensor (Reed Switch/Magnetic Sensor):
+ * - GPIO 14 to sensor signal (detects closed position)
+ * - Sensor should pull GPIO 14 LOW when door is closed
+ * - Use internal pull-up resistor
  *
  * Setup:
- * 1. Create a device on sinric.pro and get your credentials
+ * 1. Create a Garage Door device on sinric.pro and get your credentials
  * 2. Update WIFI_SSID, WIFI_PASSWORD, APP_KEY, APP_SECRET, DEVICE_ID
  * 3. Build and flash to your Pico W
- * 4. Control via "Alexa, turn on [device name]"
+ * 4. Control via "Alexa, open the garage" or "Alexa, close the garage"
  *
  * Connection Mode:
  * - Default: Secure mode (WSS on port 443) with TLS encryption
@@ -34,7 +53,7 @@
 #include "hardware/gpio.h"
 
 #include "sinricpro/sinricpro.h"
-#include "sinricpro/sinricpro_switch.h"
+#include "sinricpro/sinricpro_garagedoor.h"
 
 // =============================================================================
 // Configuration - UPDATE THESE VALUES
@@ -52,16 +71,18 @@
 // Hardware Configuration
 // =============================================================================
 
-#define LED_PIN         15  // GPIO for LED/Relay output
-#define BUTTON_PIN      14  // GPIO for physical button input
+#define RELAY_PIN       15  // GPIO for relay output (triggers garage door opener)
+#define SENSOR_PIN      14  // GPIO for door position sensor (LOW = closed, HIGH = open)
+#define BUTTON_PIN      13  // GPIO for physical button input
 #define DEBOUNCE_MS     50  // Button debounce time
+#define RELAY_PULSE_MS  200 // Duration to activate relay (simulates button press)
 
 // =============================================================================
 // Global Variables
 // =============================================================================
 
-static sinricpro_switch_t my_switch;
-static bool current_state = false;
+static sinricpro_garagedoor_t my_garagedoor;
+static bool current_door_state = false;  // false = open, true = closed
 static uint32_t last_button_press = 0;
 
 // =============================================================================
@@ -69,21 +90,30 @@ static uint32_t last_button_press = 0;
 // =============================================================================
 
 /**
- * @brief Handle power state change from cloud (Alexa/Google/App)
+ * @brief Handle door state change from cloud (Alexa/Google/App)
  *
- * This is called when a voice command or app toggles the switch.
- * Update your hardware (relay, LED) here.
+ * This is called when a voice command or app requests to open/close the door.
+ * Trigger the relay to activate the garage door opener.
  *
  * @param device The device receiving the command
- * @param state  Pointer to new state (can be modified)
+ * @param state  Pointer to new state (true = close, false = open)
  * @return true if successful, false on error
  */
-bool on_power_state(sinricpro_device_t *device, bool *state) {
-    printf("[Callback] Power state: %s\n", *state ? "ON" : "OFF");
+bool on_door_state(sinricpro_device_t *device, bool *state) {
+    printf("[Callback] Door command: %s\n", *state ? "CLOSE" : "OPEN");
 
-    // Update hardware
-    gpio_put(LED_PIN, *state);
-    current_state = *state;
+    // Activate relay with a momentary pulse (simulates pressing wall button)
+    gpio_put(RELAY_PIN, true);
+    sleep_ms(RELAY_PULSE_MS);
+    gpio_put(RELAY_PIN, false);
+
+    // Update current state
+    // Note: In a real implementation, you would wait for the sensor
+    // to confirm the door has moved. For this example, we assume success.
+    current_door_state = *state;
+
+    printf("[Door] Relay activated - door should be %s\n",
+           *state ? "closing" : "opening");
 
     return true;  // Return true to indicate success
 }
@@ -122,10 +152,15 @@ void on_state_change(sinricpro_state_t state, void *user_data) {
  * @brief Initialize GPIO pins
  */
 void init_hardware(void) {
-    // Initialize LED output
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
-    gpio_put(LED_PIN, false);
+    // Initialize relay output
+    gpio_init(RELAY_PIN);
+    gpio_set_dir(RELAY_PIN, GPIO_OUT);
+    gpio_put(RELAY_PIN, false);
+
+    // Initialize door sensor input with pull-up
+    gpio_init(SENSOR_PIN);
+    gpio_set_dir(SENSOR_PIN, GPIO_IN);
+    gpio_pull_up(SENSOR_PIN);
 
     // Initialize button input with pull-up
     gpio_init(BUTTON_PIN);
@@ -151,6 +186,15 @@ bool check_button(void) {
 
     last_state = button_state;
     return false;
+}
+
+/**
+ * @brief Read door position sensor
+ * @return true if door is closed, false if open
+ */
+bool read_door_sensor(void) {
+    // Sensor pulls pin LOW when door is closed
+    return !gpio_get(SENSOR_PIN);
 }
 
 // =============================================================================
@@ -203,11 +247,16 @@ int main() {
 
     printf("\n");
     printf("================================================\n");
-    printf("SinricPro Switch Example for Pico W\n");
+    printf("SinricPro Garage Door Example for Pico W\n");
     printf("================================================\n\n");
 
     // Initialize hardware
     init_hardware();
+
+    // Read initial door state from sensor
+    current_door_state = read_door_sensor();
+    printf("[Sensor] Initial door state: %s\n",
+           current_door_state ? "CLOSED" : "OPEN");
 
     // =============================================================================
     // Step 1: Connect to WiFi (user responsibility)
@@ -243,7 +292,7 @@ int main() {
 #else
         .enable_debug = false
 #endif
-        
+
     };
 
     if (!sinricpro_init(&config)) {
@@ -254,17 +303,17 @@ int main() {
     // Set state change callback
     sinricpro_on_state_change(on_state_change, NULL);
 
-    // Initialize switch device
-    if (!sinricpro_switch_init(&my_switch, DEVICE_ID)) {
-        printf("ERROR: Failed to initialize switch device\n");
+    // Initialize garage door device
+    if (!sinricpro_garagedoor_init(&my_garagedoor, DEVICE_ID)) {
+        printf("ERROR: Failed to initialize garage door device\n");
         return 1;
     }
 
-    // Set power state callback
-    sinricpro_switch_on_power_state(&my_switch, on_power_state);
+    // Set door state callback
+    sinricpro_garagedoor_on_door_state(&my_garagedoor, on_door_state);
 
     // Add device to SinricPro
-    if (!sinricpro_add_device((sinricpro_device_t *)&my_switch)) {
+    if (!sinricpro_add_device((sinricpro_device_t *)&my_garagedoor)) {
         printf("ERROR: Failed to add device\n");
         return 1;
     }
@@ -282,11 +331,11 @@ int main() {
     printf("\n");
     printf("================================================\n");
     printf("Ready! Voice commands:\n");
-    printf("  'Alexa, turn on [device name]'\n");
-    printf("  'Alexa, turn off [device name]'\n");
-    printf("  'Hey Google, turn on [device name]'\n");
+    printf("  'Alexa, open the garage'\n");
+    printf("  'Alexa, close the garage'\n");
+    printf("  'Hey Google, open the garage'\n");
     printf("\n");
-    printf("Press the button to toggle locally.\n");
+    printf("Press the button to trigger door manually.\n");
     printf("================================================\n\n");
 
     // Main loop
@@ -299,15 +348,38 @@ int main() {
 
         // Check for physical button press
         if (check_button()) {
-            // Toggle state
-            current_state = !current_state;
-            gpio_put(LED_PIN, current_state);
+            printf("[Button] Manual door activation\n");
 
-            printf("[Button] Toggled to: %s\n", current_state ? "ON" : "OFF");
+            // Activate relay with a momentary pulse
+            gpio_put(RELAY_PIN, true);
+            sleep_ms(RELAY_PULSE_MS);
+            gpio_put(RELAY_PIN, false);
+
+            // Toggle state (or wait for sensor confirmation)
+            current_door_state = !current_door_state;
 
             // Send event to cloud
             if (sinricpro_is_connected()) {
-                sinricpro_switch_send_power_state_event(&my_switch, current_state);
+                sinricpro_garagedoor_send_door_state_event(&my_garagedoor, current_door_state);
+            }
+        }
+
+        // Monitor door sensor for state changes
+        static uint32_t last_sensor_check = 0;
+        if (now - last_sensor_check > 500) {  // Check sensor every 500ms
+            last_sensor_check = now;
+            bool sensor_state = read_door_sensor();
+
+            // If sensor state differs from our current state, update cloud
+            if (sensor_state != current_door_state) {
+                current_door_state = sensor_state;
+                printf("[Sensor] Door state changed: %s\n",
+                       current_door_state ? "CLOSED" : "OPEN");
+
+                // Send event to cloud
+                if (sinricpro_is_connected()) {
+                    sinricpro_garagedoor_send_door_state_event(&my_garagedoor, current_door_state);
+                }
             }
         }
 

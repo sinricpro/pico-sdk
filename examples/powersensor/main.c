@@ -1,22 +1,26 @@
 /**
  * @file main.c
- * @brief SinricPro Temperature Sensor Example for Raspberry Pi Pico W
+ * @brief SinricPro Power Sensor Example for Raspberry Pi Pico W
  *
- * This example demonstrates how to create a temperature and humidity sensor
- * that reports readings to SinricPro for monitoring and automation.
+ * This example demonstrates how to create a power sensor that monitors
+ * voltage, current, power, and power factor, reporting readings to SinricPro
+ * for energy monitoring and automation.
  *
  * Hardware:
  * - Raspberry Pi Pico W
- * - Option 1: Use built-in temperature sensor (RP2040 ADC4)
- * - Option 2: Connect DHT22, AHT10, or similar I2C/GPIO sensor
+ * - Power measurement IC (e.g., ACS712 current sensor)
+ * - ADC connections:
+ *   - GPIO26 (ADC0): Voltage measurement
+ *   - GPIO27 (ADC1): Current measurement
+ *   - GPIO28 (ADC2): Optional power measurement
  *
- * This example uses the built-in RP2040 temperature sensor.
- * For external sensors (DHT22, AHT10, etc.), replace the read_sensor() function.
+ * This example simulates a power meter reading 230V AC mains with current sensing.
+ * For actual power monitoring, connect appropriate voltage divider and current sensor.
  *
  * Alexa Usage:
- * - "Alexa, what's the temperature in [room name]?"
- * - "Alexa, what's the humidity in [room name]?"
- * - Create routines based on temperature thresholds
+ * - "Alexa, what's the power usage?"
+ * - Create routines based on power consumption thresholds
+ * - Monitor energy usage in real-time
  *
  * Connection Mode:
  * - Default: Secure mode (WSS on port 443) with TLS encryption
@@ -34,9 +38,10 @@
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "hardware/adc.h"
+#include "hardware/gpio.h"
 
 #include "sinricpro/sinricpro.h"
-#include "sinricpro/sinricpro_temperature_sensor.h"
+#include "sinricpro/sinricpro_powersensor.h"
 
 // =============================================================================
 // Configuration - UPDATE THESE VALUES
@@ -56,46 +61,110 @@
 
 #define REPORT_INTERVAL_MS  60000  // Report every 60 seconds (minimum allowed)
 
+// ADC pin assignments
+#define VOLTAGE_ADC_PIN     26  // GPIO26 - ADC0
+#define CURRENT_ADC_PIN     27  // GPIO27 - ADC1
+
+// Calibration values (adjust based on your hardware)
+#define VOLTAGE_SCALE       100.0f  // Voltage divider ratio
+#define CURRENT_SCALE       10.0f   // Current sensor sensitivity (A/V)
+#define MAINS_VOLTAGE       230.0f  // Nominal mains voltage (adjust for your region)
+
 // =============================================================================
 // Global Variables
 // =============================================================================
 
-static sinricpro_temperature_sensor_t my_temp_sensor;
+static sinricpro_powersensor_t my_power_sensor;
+
+// Power measurement structure
+typedef struct {
+    float voltage;          // RMS voltage (V)
+    float current;          // RMS current (A)
+    float power;            // Active power (W)
+    float apparent_power;   // Apparent power (VA)
+    float reactive_power;   // Reactive power (VAR)
+    float power_factor;     // Power factor (0-1)
+} power_measurement_t;
 
 // =============================================================================
 // Sensor Functions
 // =============================================================================
 
 /**
- * @brief Initialize the temperature sensor hardware
+ * @brief Initialize the power sensor hardware
  */
 void init_sensor(void) {
-    // Initialize ADC for built-in temperature sensor
+    // Initialize ADC
     adc_init();
-    adc_set_temp_sensor_enabled(true);
-    adc_select_input(4);  // Select ADC4 (internal temperature sensor)
+
+    // Initialize ADC pins
+    adc_gpio_init(VOLTAGE_ADC_PIN);
+    adc_gpio_init(CURRENT_ADC_PIN);
+
+    printf("[Sensor] Power sensor initialized\n");
+    printf("[Sensor] Voltage ADC: GPIO%d, Current ADC: GPIO%d\n",
+           VOLTAGE_ADC_PIN, CURRENT_ADC_PIN);
 }
 
 /**
- * @brief Read temperature from RP2040 built-in sensor
+ * @brief Read voltage from ADC
  *
- * @param temperature Output: temperature in Celsius
- * @param humidity    Output: humidity percentage (simulated for this example)
+ * In a real implementation, this would read from a voltage divider circuit.
+ * This example simulates 230V AC mains voltage.
  */
-void read_sensor(float *temperature, float *humidity) {
-    // Read raw ADC value from temperature sensor
-    uint16_t adc_raw = adc_read();
+float read_voltage(void) {
+    // For this example, we'll simulate readings
+    // In real hardware:
+    // adc_select_input(VOLTAGE_ADC_PIN - 26);  // ADC0
+    // uint16_t raw = adc_read();
+    // float voltage = (raw * 3.3f / 4096.0f) * VOLTAGE_SCALE;
 
-    // Convert to voltage (3.3V reference, 12-bit ADC)
-    float voltage = adc_raw * 3.3f / 4096.0f;
+    // Simulate 230V +/- small variation
+    return MAINS_VOLTAGE + ((rand() % 20) - 10) * 0.1f;
+}
 
-    // Convert to temperature (RP2040 datasheet formula)
-    // T = 27 - (ADC_voltage - 0.706) / 0.001721
-    *temperature = 27.0f - (voltage - 0.706f) / 0.001721f;
+/**
+ * @brief Read current from ADC
+ *
+ * In a real implementation, this would read from a current sensor (e.g., ACS712).
+ * This example simulates a typical household load.
+ */
+float read_current(void) {
+    // For this example, we'll simulate readings
+    // In real hardware:
+    // adc_select_input(CURRENT_ADC_PIN - 26);  // ADC1
+    // uint16_t raw = adc_read();
+    // float voltage = raw * 3.3f / 4096.0f;
+    // float current = (voltage - 1.65f) * CURRENT_SCALE;  // ACS712 outputs 1.65V at 0A
 
-    // Simulate humidity (replace with actual sensor reading if available)
-    // For DHT22 or AHT10, read actual humidity here
-    *humidity = 50.0f;
+    // Simulate varying current load (0.3A to 0.7A)
+    return 0.5f + ((rand() % 40) - 20) * 0.01f;
+}
+
+/**
+ * @brief Perform power measurement
+ *
+ * Calculates all power-related values from voltage and current measurements.
+ */
+void measure_power(power_measurement_t *measurement) {
+    // Read voltage and current
+    measurement->voltage = read_voltage();
+    measurement->current = read_current();
+
+    // Calculate active power (W)
+    // For AC power: P = V * I * power_factor
+    // We'll assume a typical power factor of 0.95
+    measurement->power_factor = 0.95f;
+    measurement->power = measurement->voltage * measurement->current * measurement->power_factor;
+
+    // Calculate apparent power (VA)
+    measurement->apparent_power = measurement->voltage * measurement->current;
+
+    // Calculate reactive power (VAR)
+    // Q = sqrt(S^2 - P^2)
+    float s_squared = measurement->apparent_power * measurement->apparent_power;
+    float p_squared = measurement->power * measurement->power;
+    measurement->reactive_power = sqrtf(s_squared - p_squared);
 }
 
 // =============================================================================
@@ -133,8 +202,8 @@ int main() {
 
     printf("\n");
     printf("================================================\n");
-    printf("SinricPro Temperature Sensor Example\n");
-    printf("Using RP2040 built-in temperature sensor\n");
+    printf("SinricPro Power Sensor Example\n");
+    printf("Monitoring AC power consumption\n");
     printf("================================================\n\n");
 
     // =============================================================================
@@ -190,16 +259,16 @@ int main() {
     // Register state change callback
     sinricpro_on_state_change(on_state_change, NULL);
 
-    // Initialize temperature sensor device
-    if (!sinricpro_temperature_sensor_init(&my_temp_sensor, DEVICE_ID)) {
-        printf("ERROR: Failed to initialize temperature sensor device\n");
+    // Initialize power sensor device
+    if (!sinricpro_powersensor_init(&my_power_sensor, DEVICE_ID)) {
+        printf("ERROR: Failed to initialize power sensor device\n");
         return 1;
     }
 
-    // Note: Temperature sensors are event-only devices, no callbacks needed
+    // Note: Power sensors are event-only devices, no callbacks needed
 
     // Add device to SinricPro
-    if (!sinricpro_add_device((sinricpro_device_t *)&my_temp_sensor)) {
+    if (!sinricpro_add_device((sinricpro_device_t *)&my_power_sensor)) {
         printf("ERROR: Failed to add device\n");
         return 1;
     }
@@ -216,11 +285,10 @@ int main() {
 
     printf("\n");
     printf("================================================\n");
-    printf("Ready! Reporting temperature every 60 seconds.\n");
+    printf("Ready! Monitoring power every 60 seconds.\n");
     printf("\n");
     printf("Voice Commands:\n");
-    printf("  'Alexa, what's the temperature?'\n");
-    printf("  'Alexa, what's the humidity?'\n");
+    printf("  'Alexa, what's the power usage?'\n");
     printf("================================================\n\n");
 
     // Initialize sensor hardware
@@ -235,23 +303,30 @@ int main() {
 
         uint32_t now = to_ms_since_boot(get_absolute_time());
 
-        // Report temperature/humidity every REPORT_INTERVAL_MS
+        // Report power measurements every REPORT_INTERVAL_MS
         if (now - last_report >= REPORT_INTERVAL_MS) {
             last_report = now;
 
             // Read sensor
-            float temperature, humidity;
-            read_sensor(&temperature, &humidity);
+            power_measurement_t measurement;
+            measure_power(&measurement);
 
-            printf("[Sensor] Temperature: %.1f°C, Humidity: %.1f%%\n",
-                   temperature, humidity);
+            printf("[Sensor] Voltage: %.1fV, Current: %.2fA, Power: %.1fW\n",
+                   measurement.voltage, measurement.current, measurement.power);
+            printf("[Sensor] Apparent: %.1fVA, Reactive: %.1fVAR, PF: %.2f\n",
+                   measurement.apparent_power, measurement.reactive_power,
+                   measurement.power_factor);
 
             // Send event to SinricPro (only if connected)
             if (sinricpro_is_connected()) {
-                if (sinricpro_temperature_sensor_send_event(&my_temp_sensor,
-                                                            temperature,
-                                                            humidity)) {
-                    printf("[Sensor] Event sent successfully\n");
+                if (sinricpro_powersensor_send_power_event(&my_power_sensor,
+                                                          measurement.voltage,
+                                                          measurement.current,
+                                                          measurement.power,
+                                                          measurement.apparent_power,
+                                                          measurement.reactive_power,
+                                                          measurement.power_factor)) {
+                    printf("[Sensor] Power event sent successfully\n");
                 } else {
                     printf("[Sensor] Failed to send event (rate limited)\n");
                 }

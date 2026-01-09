@@ -1,20 +1,37 @@
 /**
  * @file main.c
- * @brief SinricPro DimSwitch Example for Raspberry Pi Pico W
+ * @brief SinricPro Lock Example for Raspberry Pi Pico W
  *
- * This example demonstrates how to create a dimmable smart switch
+ * This example demonstrates how to create a smart lock device
  * that can be controlled via Alexa, Google Home, or the SinricPro app.
  *
  * Hardware:
  * - Raspberry Pi Pico W
- * - LED connected to GPIO 15 (PWM output for dimming)
- * - Button connected to GPIO 14 (optional)
+ * - 12V solenoid lock or electric strike
+ * - Relay module or MOSFET driver connected to GPIO 15
+ * - LED connected to GPIO 14 (lock indicator - optional)
+ * - Button connected to GPIO 13 (physical lock/unlock - optional)
+ * - Magnetic sensor for jam detection (optional)
  *
- * Voice Commands:
- * - "Alexa, turn on [device name]"
- * - "Alexa, set [device name] to 50 percent"
- * - "Alexa, dim [device name]"
- * - "Alexa, brighten [device name]"
+ * Wiring Example (Relay Module):
+ * - GPIO 15 -> Relay IN
+ * - Relay COM -> Lock positive (+12V from power supply)
+ * - Relay NO -> Lock negative (GND)
+ * - Add flyback diode across lock terminals!
+ *
+ * Safety Note:
+ * - Always include a manual override for emergency access
+ * - Test fail-safe behavior (what happens if power is lost?)
+ * - Consider using fail-safe locks (unlock when power is lost)
+ *
+ * Setup:
+ * 1. Create a "Lock" device on sinric.pro and get your credentials
+ * 2. Update WIFI_SSID, WIFI_PASSWORD, APP_KEY, APP_SECRET, DEVICE_ID
+ * 3. Build and flash to your Pico W
+ * 4. Control via:
+ *    - "Alexa, lock the [device name]"
+ *    - "Alexa, unlock the [device name]"
+ *    - "Hey Google, lock the front door"
  *
  * Connection Mode:
  * - Default: Secure mode (WSS on port 443) with TLS encryption
@@ -25,17 +42,16 @@
 #define SINRICPRO_NOSSL
 
 // Uncomment the following line to enable/disable sdk debug output
-// #define ENABLE_DEBUG
+#define ENABLE_DEBUG
 
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "hardware/gpio.h"
-#include "hardware/pwm.h"
 
 #include "sinricpro/sinricpro.h"
-#include "sinricpro/sinricpro_dimswitch.h"
+#include "sinricpro/sinricpro_lock.h"
 
 // =============================================================================
 // Configuration - UPDATE THESE VALUES
@@ -53,153 +69,60 @@
 // Hardware Configuration
 // =============================================================================
 
-#define LED_PIN         15  // GPIO for PWM LED output
-#define BUTTON_PIN      14  // GPIO for physical button input
+#define LOCK_PIN        15  // GPIO for lock relay/solenoid control
+#define LED_PIN         14  // GPIO for lock status LED
+#define BUTTON_PIN      13  // GPIO for physical lock/unlock button
 #define DEBOUNCE_MS     50  // Button debounce time
 
-// PWM configuration
-#define PWM_WRAP        255 // PWM resolution (8-bit)
+// Lock timing (adjust for your lock mechanism)
+#define LOCK_ENGAGE_MS  500   // Time to keep solenoid energized to lock (ms)
+#define UNLOCK_ENGAGE_MS 500  // Time to keep solenoid energized to unlock (ms)
 
 // =============================================================================
 // Global Variables
 // =============================================================================
 
-static sinricpro_dimswitch_t my_dimmer;
-static bool current_power_state = false;
-static int current_power_level = 100;  // Default 100%
+static sinricpro_lock_t my_lock;
+static bool current_lock_state = false;  // false = unlocked, true = locked
 static uint32_t last_button_press = 0;
-static uint pwm_slice;
-
-// =============================================================================
-// Hardware Functions
-// =============================================================================
-
-/**
- * @brief Initialize PWM for LED dimming
- */
-void init_pwm(void) {
-    gpio_set_function(LED_PIN, GPIO_FUNC_PWM);
-    pwm_slice = pwm_gpio_to_slice_num(LED_PIN);
-
-    pwm_config config = pwm_get_default_config();
-    pwm_config_set_wrap(&config, PWM_WRAP);
-    pwm_init(pwm_slice, &config, true);
-
-    pwm_set_gpio_level(LED_PIN, 0);
-}
-
-/**
- * @brief Set LED brightness
- *
- * @param brightness 0-100 percentage
- */
-void set_led_brightness(int brightness) {
-    // Convert 0-100% to 0-255 PWM value
-    uint16_t pwm_value = (brightness * PWM_WRAP) / 100;
-    pwm_set_gpio_level(LED_PIN, pwm_value);
-}
-
-/**
- * @brief Update LED output based on power state and power level
- */
-void update_led(void) {
-    if (current_power_state) {
-        set_led_brightness(current_power_level);
-    } else {
-        set_led_brightness(0);
-    }
-}
-
-/**
- * @brief Initialize GPIO pins
- */
-void init_hardware(void) {
-    // Initialize PWM for LED
-    init_pwm();
-
-    // Initialize button input with pull-up
-    gpio_init(BUTTON_PIN);
-    gpio_set_dir(BUTTON_PIN, GPIO_IN);
-    gpio_pull_up(BUTTON_PIN);
-}
-
-/**
- * @brief Check for button press with debouncing
- */
-bool check_button(void) {
-    static bool last_state = true;  // Pull-up means high when not pressed
-
-    bool button_state = gpio_get(BUTTON_PIN);
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-
-    // Check for falling edge (button pressed) with debounce
-    if (!button_state && last_state && (now - last_button_press > DEBOUNCE_MS)) {
-        last_button_press = now;
-        last_state = button_state;
-        return true;
-    }
-
-    last_state = button_state;
-    return false;
-}
+static uint32_t lock_engage_time = 0;
+static bool lock_engaging = false;
 
 // =============================================================================
 // Callbacks
 // =============================================================================
 
 /**
- * @brief Handle power state change from cloud
+ * @brief Handle lock state change from cloud (Alexa/Google/App)
+ *
+ * This is called when a voice command or app locks/unlocks the device.
+ *
+ * @param device The device receiving the command
+ * @param state  Pointer to lock state (true = lock, false = unlock)
+ * @return true if successful, false if jammed/failed
  */
-bool on_power_state(sinricpro_device_t *device, bool *state) {
-    printf("[Callback] Power state: %s\n", *state ? "ON" : "OFF");
+bool on_lock_state(sinricpro_device_t *device, bool *state) {
+    printf("[Callback] Lock state: %s\n", *state ? "LOCK" : "UNLOCK");
 
-    current_power_state = *state;
-    update_led();
+    // Simulate lock mechanism
+    // In a real application, you would:
+    // 1. Energize solenoid/motor
+    // 2. Check sensor to verify lock engaged
+    // 3. Return false if jammed
 
-    return true;
-}
+    current_lock_state = *state;
 
-/**
- * @brief Handle power level change from cloud
- */
-bool on_power_level(sinricpro_device_t *device, int *power_level) {
-    printf("[Callback] Power level: %d%%\n", *power_level);
+    // Update hardware - energize lock
+    gpio_put(LOCK_PIN, true);
+    gpio_put(LED_PIN, current_lock_state);
 
-    current_power_level = *power_level;
+    lock_engaging = true;
+    lock_engage_time = to_ms_since_boot(get_absolute_time());
 
-    // If power level is set while off, turn on
-    if (current_power_level > 0 && !current_power_state) {
-        current_power_state = true;
-    }
+    printf("[Hardware] Lock mechanism %s\n", current_lock_state ? "LOCKED" : "UNLOCKED");
 
-    update_led();
-
-    return true;
-}
-
-/**
- * @brief Handle adjust power level from cloud (dim/brighten commands)
- */
-bool on_adjust_power_level(sinricpro_device_t *device, int *power_level_delta) {
-    printf("[Callback] Adjust power level: %+d%%\n", *power_level_delta);
-
-    // Apply delta to current power level
-    current_power_level += *power_level_delta;
-
-    // Clamp to 0-100
-    if (current_power_level < 0) current_power_level = 0;
-    if (current_power_level > 100) current_power_level = 100;
-
-    // Return absolute power level
-    *power_level_delta = current_power_level;
-
-    // Turn on if adjusting while off
-    if (current_power_level > 0 && !current_power_state) {
-        current_power_state = true;
-    }
-
-    update_led();
-
+    // In a real implementation, check sensor here and return false if jammed
+    // For this example, we always succeed
     return true;
 }
 
@@ -230,16 +153,75 @@ void on_state_change(sinricpro_state_t state, void *user_data) {
 }
 
 // =============================================================================
+// Hardware Functions
+// =============================================================================
+
+/**
+ * @brief Initialize GPIO pins
+ */
+void init_hardware(void) {
+    // Initialize lock control output (relay/solenoid)
+    gpio_init(LOCK_PIN);
+    gpio_set_dir(LOCK_PIN, GPIO_OUT);
+    gpio_put(LOCK_PIN, false);  // Start with lock de-energized
+
+    // Initialize LED output
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_put(LED_PIN, false);  // Start with LED off (unlocked)
+
+    // Initialize button input with pull-up
+    gpio_init(BUTTON_PIN);
+    gpio_set_dir(BUTTON_PIN, GPIO_IN);
+    gpio_pull_up(BUTTON_PIN);
+}
+
+/**
+ * @brief Check for button press with debouncing
+ */
+bool check_button(void) {
+    static bool last_state = true;  // Pull-up means high when not pressed
+
+    bool button_state = gpio_get(BUTTON_PIN);
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+
+    // Check for falling edge (button pressed) with debounce
+    if (!button_state && last_state && (now - last_button_press > DEBOUNCE_MS)) {
+        last_button_press = now;
+        last_state = button_state;
+        return true;
+    }
+
+    last_state = button_state;
+    return false;
+}
+
+/**
+ * @brief Handle lock engaging/disengaging timing
+ *
+ * Keeps the solenoid energized for a brief period, then de-energizes it
+ * to prevent overheating and save power.
+ */
+void handle_lock_timing(void) {
+    if (!lock_engaging) return;
+
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t engage_duration = current_lock_state ? LOCK_ENGAGE_MS : UNLOCK_ENGAGE_MS;
+
+    if (now - lock_engage_time >= engage_duration) {
+        // De-energize solenoid
+        gpio_put(LOCK_PIN, false);
+        lock_engaging = false;
+        printf("[Hardware] Lock mechanism de-energized\n");
+    }
+}
+
+// =============================================================================
 // WiFi Functions
 // =============================================================================
 
 /**
  * @brief Connect to WiFi network
- *
- * Initializes the WiFi hardware and connects to the specified network.
- * This must be called before sinricpro_begin().
- *
- * @return true if connected successfully, false on error
  */
 bool connect_wifi(void) {
     printf("[1/4] Initializing WiFi...\n");
@@ -279,16 +261,13 @@ int main() {
 
     printf("\n");
     printf("================================================\n");
-    printf("SinricPro DimSwitch Example for Pico W\n");
+    printf("SinricPro Lock Example for Pico W\n");
     printf("================================================\n\n");
 
     // Initialize hardware
     init_hardware();
 
-    // =============================================================================
-    // Step 1: Connect to WiFi (user responsibility)
-    // =============================================================================
-
+    // Connect to WiFi
     if (!connect_wifi()) {
         // Blink LED rapidly on WiFi error
         while (1) {
@@ -300,7 +279,7 @@ int main() {
     }
 
     // =============================================================================
-    // Step 2: Initialize SinricPro SDK
+    // Initialize SinricPro SDK
     // =============================================================================
 
     printf("[3/4] Initializing SinricPro SDK...\n");
@@ -319,6 +298,7 @@ int main() {
 #else
         .enable_debug = false
 #endif
+
     };
 
     if (!sinricpro_init(&config)) {
@@ -329,25 +309,23 @@ int main() {
     // Set state change callback
     sinricpro_on_state_change(on_state_change, NULL);
 
-    // Initialize dimswitch device
-    if (!sinricpro_dimswitch_init(&my_dimmer, DEVICE_ID)) {
-        printf("ERROR: Failed to initialize dimswitch device\n");
+    // Initialize lock device
+    if (!sinricpro_lock_init(&my_lock, DEVICE_ID)) {
+        printf("ERROR: Failed to initialize lock device\n");
         return 1;
     }
 
-    // Set callbacks
-    sinricpro_dimswitch_on_power_state(&my_dimmer, on_power_state);
-    sinricpro_dimswitch_on_power_level(&my_dimmer, on_power_level);
-    sinricpro_dimswitch_on_adjust_power_level(&my_dimmer, on_adjust_power_level);
+    // Set lock state callback
+    sinricpro_lock_on_lock_state(&my_lock, on_lock_state);
 
     // Add device to SinricPro
-    if (!sinricpro_add_device((sinricpro_device_t *)&my_dimmer)) {
+    if (!sinricpro_add_device((sinricpro_device_t *)&my_lock)) {
         printf("ERROR: Failed to add device\n");
         return 1;
     }
 
     // =============================================================================
-    // Step 3: Connect to SinricPro Server
+    // Connect to SinricPro Server
     // =============================================================================
 
     printf("[4/4] Connecting to SinricPro...\n");
@@ -359,38 +337,47 @@ int main() {
     printf("\n");
     printf("================================================\n");
     printf("Ready! Voice commands:\n");
-    printf("  'Alexa, turn on [device name]'\n");
-    printf("  'Alexa, turn off [device name]'\n");
-    printf("  'Alexa, set [device name] to 50 percent'\n");
-    printf("  'Alexa, dim [device name]'\n");
-    printf("  'Alexa, brighten [device name]'\n");
+    printf("  'Alexa, lock the [device name]'\n");
+    printf("  'Alexa, unlock the [device name]'\n");
+    printf("  'Hey Google, lock the front door'\n");
     printf("\n");
-    printf("Press button to toggle power.\n");
+    printf("Press the button to toggle lock/unlock.\n");
     printf("================================================\n\n");
+    printf("WARNING: Always ensure manual override access!\n\n");
 
     // Main loop
     while (1) {
+        // Get current time
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+
         // Process SinricPro events
         sinricpro_handle();
 
+        // Handle lock timing (de-energize solenoid after engage time)
+        handle_lock_timing();
+
         // Check for physical button press
         if (check_button()) {
-            // Toggle power state
-            current_power_state = !current_power_state;
-            update_led();
+            // Toggle lock state
+            current_lock_state = !current_lock_state;
 
-            printf("[Button] Power: %s (power level: %d%%)\n",
-                   current_power_state ? "ON" : "OFF", current_power_level);
+            // Energize lock mechanism
+            gpio_put(LOCK_PIN, true);
+            gpio_put(LED_PIN, current_lock_state);
+
+            lock_engaging = true;
+            lock_engage_time = now;
+
+            printf("[Button] Lock %s\n", current_lock_state ? "LOCKED" : "UNLOCKED");
 
             // Send event to cloud
             if (sinricpro_is_connected()) {
-                sinricpro_dimswitch_send_power_state_event(&my_dimmer, current_power_state);
+                sinricpro_lock_send_lock_state_event(&my_lock, current_lock_state);
             }
         }
 
         // Blink onboard LED when connected
         static uint32_t last_blink = 0;
-        uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_blink > 1000) {
             last_blink = now;
             if (sinricpro_is_connected()) {

@@ -1,20 +1,31 @@
 /**
  * @file main.c
- * @brief SinricPro DimSwitch Example for Raspberry Pi Pico W
+ * @brief SinricPro Fan Example for Raspberry Pi Pico W
  *
- * This example demonstrates how to create a dimmable smart switch
+ * This example demonstrates how to create a smart fan with variable speed control
  * that can be controlled via Alexa, Google Home, or the SinricPro app.
  *
  * Hardware:
  * - Raspberry Pi Pico W
- * - LED connected to GPIO 15 (PWM output for dimming)
- * - Button connected to GPIO 14 (optional)
+ * - DC Motor or Fan connected via MOSFET/transistor to GPIO 15 (PWM output)
+ * - LED connected to GPIO 14 (optional, indicates on/off state)
+ * - Button connected to GPIO 13 (optional, for local control)
  *
- * Voice Commands:
- * - "Alexa, turn on [device name]"
- * - "Alexa, set [device name] to 50 percent"
- * - "Alexa, dim [device name]"
- * - "Alexa, brighten [device name]"
+ * Wiring Example:
+ * - GPIO 15 -> MOSFET Gate (controls motor via PWM)
+ * - MOSFET Drain -> Motor negative terminal
+ * - MOSFET Source -> GND
+ * - Motor positive terminal -> VCC (external power supply, 5-12V)
+ * - Add flyback diode across motor terminals!
+ *
+ * Setup:
+ * 1. Create a "Fan" device on sinric.pro and get your credentials
+ * 2. Update WIFI_SSID, WIFI_PASSWORD, APP_KEY, APP_SECRET, DEVICE_ID
+ * 3. Build and flash to your Pico W
+ * 4. Control via:
+ *    - "Alexa, turn on [device name]"
+ *    - "Alexa, set [device name] to 50 percent"
+ *    - "Alexa, increase [device name]"
  *
  * Connection Mode:
  * - Default: Secure mode (WSS on port 443) with TLS encryption
@@ -25,7 +36,7 @@
 #define SINRICPRO_NOSSL
 
 // Uncomment the following line to enable/disable sdk debug output
-// #define ENABLE_DEBUG
+#define ENABLE_DEBUG
 
 #include <stdio.h>
 #include <string.h>
@@ -35,7 +46,7 @@
 #include "hardware/pwm.h"
 
 #include "sinricpro/sinricpro.h"
-#include "sinricpro/sinricpro_dimswitch.h"
+#include "sinricpro/sinricpro_fan.h"
 
 // =============================================================================
 // Configuration - UPDATE THESE VALUES
@@ -53,152 +64,113 @@
 // Hardware Configuration
 // =============================================================================
 
-#define LED_PIN         15  // GPIO for PWM LED output
-#define BUTTON_PIN      14  // GPIO for physical button input
+#define FAN_PWM_PIN     15  // GPIO for PWM fan control (must be PWM-capable)
+#define LED_PIN         14  // GPIO for LED indicator
+#define BUTTON_PIN      13  // GPIO for physical button input
 #define DEBOUNCE_MS     50  // Button debounce time
-
-// PWM configuration
-#define PWM_WRAP        255 // PWM resolution (8-bit)
 
 // =============================================================================
 // Global Variables
 // =============================================================================
 
-static sinricpro_dimswitch_t my_dimmer;
+static sinricpro_fan_t my_fan;
 static bool current_power_state = false;
-static int current_power_level = 100;  // Default 100%
+static int current_power_level = 0;  // 0-100%
 static uint32_t last_button_press = 0;
-static uint pwm_slice;
 
-// =============================================================================
-// Hardware Functions
-// =============================================================================
-
-/**
- * @brief Initialize PWM for LED dimming
- */
-void init_pwm(void) {
-    gpio_set_function(LED_PIN, GPIO_FUNC_PWM);
-    pwm_slice = pwm_gpio_to_slice_num(LED_PIN);
-
-    pwm_config config = pwm_get_default_config();
-    pwm_config_set_wrap(&config, PWM_WRAP);
-    pwm_init(pwm_slice, &config, true);
-
-    pwm_set_gpio_level(LED_PIN, 0);
-}
-
-/**
- * @brief Set LED brightness
- *
- * @param brightness 0-100 percentage
- */
-void set_led_brightness(int brightness) {
-    // Convert 0-100% to 0-255 PWM value
-    uint16_t pwm_value = (brightness * PWM_WRAP) / 100;
-    pwm_set_gpio_level(LED_PIN, pwm_value);
-}
-
-/**
- * @brief Update LED output based on power state and power level
- */
-void update_led(void) {
-    if (current_power_state) {
-        set_led_brightness(current_power_level);
-    } else {
-        set_led_brightness(0);
-    }
-}
-
-/**
- * @brief Initialize GPIO pins
- */
-void init_hardware(void) {
-    // Initialize PWM for LED
-    init_pwm();
-
-    // Initialize button input with pull-up
-    gpio_init(BUTTON_PIN);
-    gpio_set_dir(BUTTON_PIN, GPIO_IN);
-    gpio_pull_up(BUTTON_PIN);
-}
-
-/**
- * @brief Check for button press with debouncing
- */
-bool check_button(void) {
-    static bool last_state = true;  // Pull-up means high when not pressed
-
-    bool button_state = gpio_get(BUTTON_PIN);
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-
-    // Check for falling edge (button pressed) with debounce
-    if (!button_state && last_state && (now - last_button_press > DEBOUNCE_MS)) {
-        last_button_press = now;
-        last_state = button_state;
-        return true;
-    }
-
-    last_state = button_state;
-    return false;
-}
+static uint pwm_slice_num;
 
 // =============================================================================
 // Callbacks
 // =============================================================================
 
 /**
- * @brief Handle power state change from cloud
+ * @brief Handle power state change from cloud (Alexa/Google/App)
+ *
+ * This is called when a voice command or app toggles the fan on/off.
+ *
+ * @param device The device receiving the command
+ * @param state  Pointer to new state (can be modified)
+ * @return true if successful, false on error
  */
 bool on_power_state(sinricpro_device_t *device, bool *state) {
     printf("[Callback] Power state: %s\n", *state ? "ON" : "OFF");
 
     current_power_state = *state;
-    update_led();
+
+    // Update hardware
+    gpio_put(LED_PIN, current_power_state);
+
+    if (current_power_state) {
+        // Fan is ON - apply current power level
+        uint16_t pwm_level = (current_power_level * 65535) / 100;
+        pwm_set_gpio_level(FAN_PWM_PIN, pwm_level);
+        printf("[Hardware] Fan speed: %d%%\n", current_power_level);
+    } else {
+        // Fan is OFF - stop PWM
+        pwm_set_gpio_level(FAN_PWM_PIN, 0);
+    }
 
     return true;
 }
 
 /**
  * @brief Handle power level change from cloud
+ *
+ * This is called when a voice command sets the fan speed.
+ * Example: "Alexa, set fan to 75 percent"
+ *
+ * @param device      The device receiving the command
+ * @param power_level Pointer to new power level 0-100 (can be modified)
+ * @return true if successful, false on error
  */
 bool on_power_level(sinricpro_device_t *device, int *power_level) {
     printf("[Callback] Power level: %d%%\n", *power_level);
 
+    // Clamp to valid range
+    if (*power_level < 0) *power_level = 0;
+    if (*power_level > 100) *power_level = 100;
+
     current_power_level = *power_level;
 
-    // If power level is set while off, turn on
-    if (current_power_level > 0 && !current_power_state) {
-        current_power_state = true;
+    // If fan is on, update PWM immediately
+    if (current_power_state) {
+        uint16_t pwm_level = (current_power_level * 65535) / 100;
+        pwm_set_gpio_level(FAN_PWM_PIN, pwm_level);
+        printf("[Hardware] Fan speed: %d%%\n", current_power_level);
     }
-
-    update_led();
 
     return true;
 }
 
 /**
- * @brief Handle adjust power level from cloud (dim/brighten commands)
+ * @brief Handle relative power level adjustment
+ *
+ * This is called when a voice command adjusts the fan speed relatively.
+ * Example: "Alexa, increase fan" (adds +10%)
+ *
+ * @param device        The device receiving the command
+ * @param power_level_delta Pointer to delta value (can be modified)
+ * @return true if successful, false on error
  */
 bool on_adjust_power_level(sinricpro_device_t *device, int *power_level_delta) {
     printf("[Callback] Adjust power level: %+d%%\n", *power_level_delta);
 
-    // Apply delta to current power level
-    current_power_level += *power_level_delta;
+    // Calculate new level
+    int new_level = current_power_level + *power_level_delta;
 
-    // Clamp to 0-100
-    if (current_power_level < 0) current_power_level = 0;
-    if (current_power_level > 100) current_power_level = 100;
+    // Clamp to valid range
+    if (new_level < 0) new_level = 0;
+    if (new_level > 100) new_level = 100;
 
-    // Return absolute power level
-    *power_level_delta = current_power_level;
+    current_power_level = new_level;
 
-    // Turn on if adjusting while off
-    if (current_power_level > 0 && !current_power_state) {
-        current_power_state = true;
+    // If fan is on, update PWM immediately
+    if (current_power_state) {
+        uint16_t pwm_level = (current_power_level * 65535) / 100;
+        pwm_set_gpio_level(FAN_PWM_PIN, pwm_level);
+        printf("[Hardware] New fan speed: %d%%\n", current_power_level);
     }
-
-    update_led();
 
     return true;
 }
@@ -230,16 +202,64 @@ void on_state_change(sinricpro_state_t state, void *user_data) {
 }
 
 // =============================================================================
+// Hardware Functions
+// =============================================================================
+
+/**
+ * @brief Initialize GPIO pins and PWM
+ */
+void init_hardware(void) {
+    // Initialize LED output
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_put(LED_PIN, false);
+
+    // Initialize button input with pull-up
+    gpio_init(BUTTON_PIN);
+    gpio_set_dir(BUTTON_PIN, GPIO_IN);
+    gpio_pull_up(BUTTON_PIN);
+
+    // Initialize PWM for fan control
+    gpio_set_function(FAN_PWM_PIN, GPIO_FUNC_PWM);
+    pwm_slice_num = pwm_gpio_to_slice_num(FAN_PWM_PIN);
+
+    // Set PWM frequency to ~25kHz (good for motor control)
+    pwm_set_wrap(pwm_slice_num, 65535);
+    pwm_set_clkdiv(pwm_slice_num, 2.0f);
+
+    // Start with fan off
+    pwm_set_gpio_level(FAN_PWM_PIN, 0);
+    pwm_set_enabled(pwm_slice_num, true);
+
+    printf("[Hardware] PWM initialized on GPIO %d (slice %d)\n", FAN_PWM_PIN, pwm_slice_num);
+}
+
+/**
+ * @brief Check for button press with debouncing
+ */
+bool check_button(void) {
+    static bool last_state = true;  // Pull-up means high when not pressed
+
+    bool button_state = gpio_get(BUTTON_PIN);
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+
+    // Check for falling edge (button pressed) with debounce
+    if (!button_state && last_state && (now - last_button_press > DEBOUNCE_MS)) {
+        last_button_press = now;
+        last_state = button_state;
+        return true;
+    }
+
+    last_state = button_state;
+    return false;
+}
+
+// =============================================================================
 // WiFi Functions
 // =============================================================================
 
 /**
  * @brief Connect to WiFi network
- *
- * Initializes the WiFi hardware and connects to the specified network.
- * This must be called before sinricpro_begin().
- *
- * @return true if connected successfully, false on error
  */
 bool connect_wifi(void) {
     printf("[1/4] Initializing WiFi...\n");
@@ -279,16 +299,13 @@ int main() {
 
     printf("\n");
     printf("================================================\n");
-    printf("SinricPro DimSwitch Example for Pico W\n");
+    printf("SinricPro Fan Example for Pico W\n");
     printf("================================================\n\n");
 
     // Initialize hardware
     init_hardware();
 
-    // =============================================================================
-    // Step 1: Connect to WiFi (user responsibility)
-    // =============================================================================
-
+    // Connect to WiFi
     if (!connect_wifi()) {
         // Blink LED rapidly on WiFi error
         while (1) {
@@ -300,7 +317,7 @@ int main() {
     }
 
     // =============================================================================
-    // Step 2: Initialize SinricPro SDK
+    // Initialize SinricPro SDK
     // =============================================================================
 
     printf("[3/4] Initializing SinricPro SDK...\n");
@@ -319,6 +336,7 @@ int main() {
 #else
         .enable_debug = false
 #endif
+
     };
 
     if (!sinricpro_init(&config)) {
@@ -329,25 +347,25 @@ int main() {
     // Set state change callback
     sinricpro_on_state_change(on_state_change, NULL);
 
-    // Initialize dimswitch device
-    if (!sinricpro_dimswitch_init(&my_dimmer, DEVICE_ID)) {
-        printf("ERROR: Failed to initialize dimswitch device\n");
+    // Initialize fan device
+    if (!sinricpro_fan_init(&my_fan, DEVICE_ID)) {
+        printf("ERROR: Failed to initialize fan device\n");
         return 1;
     }
 
     // Set callbacks
-    sinricpro_dimswitch_on_power_state(&my_dimmer, on_power_state);
-    sinricpro_dimswitch_on_power_level(&my_dimmer, on_power_level);
-    sinricpro_dimswitch_on_adjust_power_level(&my_dimmer, on_adjust_power_level);
+    sinricpro_fan_on_power_state(&my_fan, on_power_state);
+    sinricpro_fan_on_power_level(&my_fan, on_power_level);
+    sinricpro_fan_on_adjust_power_level(&my_fan, on_adjust_power_level);
 
     // Add device to SinricPro
-    if (!sinricpro_add_device((sinricpro_device_t *)&my_dimmer)) {
+    if (!sinricpro_add_device((sinricpro_device_t *)&my_fan)) {
         printf("ERROR: Failed to add device\n");
         return 1;
     }
 
     // =============================================================================
-    // Step 3: Connect to SinricPro Server
+    // Connect to SinricPro Server
     // =============================================================================
 
     printf("[4/4] Connecting to SinricPro...\n");
@@ -360,37 +378,58 @@ int main() {
     printf("================================================\n");
     printf("Ready! Voice commands:\n");
     printf("  'Alexa, turn on [device name]'\n");
-    printf("  'Alexa, turn off [device name]'\n");
     printf("  'Alexa, set [device name] to 50 percent'\n");
-    printf("  'Alexa, dim [device name]'\n");
-    printf("  'Alexa, brighten [device name]'\n");
+    printf("  'Alexa, increase [device name]'\n");
+    printf("  'Hey Google, set [device name] to high'\n");
     printf("\n");
-    printf("Press button to toggle power.\n");
+    printf("Press the button to cycle fan speeds.\n");
     printf("================================================\n\n");
 
     // Main loop
     while (1) {
+        // Get current time
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+
         // Process SinricPro events
         sinricpro_handle();
 
         // Check for physical button press
         if (check_button()) {
-            // Toggle power state
-            current_power_state = !current_power_state;
-            update_led();
+            // Cycle through speeds: OFF -> 33% -> 66% -> 100% -> OFF
+            if (!current_power_state) {
+                // Turn on at 33%
+                current_power_state = true;
+                current_power_level = 33;
+            } else if (current_power_level < 100) {
+                // Increase speed
+                current_power_level += 33;
+                if (current_power_level > 100) current_power_level = 100;
+            } else {
+                // Turn off
+                current_power_state = false;
+                current_power_level = 0;
+            }
 
-            printf("[Button] Power: %s (power level: %d%%)\n",
-                   current_power_state ? "ON" : "OFF", current_power_level);
+            // Update hardware
+            gpio_put(LED_PIN, current_power_state);
+            uint16_t pwm_level = current_power_state ? (current_power_level * 65535) / 100 : 0;
+            pwm_set_gpio_level(FAN_PWM_PIN, pwm_level);
 
-            // Send event to cloud
+            printf("[Button] Fan %s at %d%%\n",
+                   current_power_state ? "ON" : "OFF",
+                   current_power_level);
+
+            // Send events to cloud
             if (sinricpro_is_connected()) {
-                sinricpro_dimswitch_send_power_state_event(&my_dimmer, current_power_state);
+                sinricpro_fan_send_power_state_event(&my_fan, current_power_state);
+                if (current_power_state) {
+                    sinricpro_fan_send_power_level_event(&my_fan, current_power_level);
+                }
             }
         }
 
         // Blink onboard LED when connected
         static uint32_t last_blink = 0;
-        uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_blink > 1000) {
             last_blink = now;
             if (sinricpro_is_connected()) {

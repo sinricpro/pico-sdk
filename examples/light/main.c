@@ -27,7 +27,7 @@
  */
 
 // Uncomment this line to use non-secure WebSocket (port 80) for low memory devices
-// #define SINRICPRO_NOSSL
+#define SINRICPRO_NOSSL
 
 // Uncomment the following line to enable/disable sdk debug output
 // #define ENABLE_DEBUG
@@ -408,7 +408,17 @@ int main() {
     sinricpro_config_t config = {
         .app_key = APP_KEY,
         .app_secret = APP_SECRET,
+#ifdef SINRICPRO_NOSSL
+        .use_ssl = false,  // Non-secure mode (port 80)
+#else
+        .use_ssl = true,   // Secure mode (port 443) - default
+#endif
+
+#ifdef ENABLE_DEBUG
+        .enable_debug = true
+#else
         .enable_debug = false
+#endif
     };
 
     if (!sinricpro_init(&config)) {
