@@ -29,6 +29,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "hardware/gpio.h"
@@ -366,10 +367,14 @@ int main() {
     printf("  'Alexa, brighten [device name]'\n");
     printf("\n");
     printf("Press button to toggle power.\n");
+    printf("Random power level events sent every 30 sec.\n");
     printf("================================================\n\n");
 
     // Main loop
     while (1) {
+        // Get current time for this iteration
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+
         // Process SinricPro events
         sinricpro_handle();
 
@@ -388,9 +393,28 @@ int main() {
             }
         }
 
+        // Send random power level event every 30 seconds
+        static uint32_t last_random_event = 0;
+        if (now - last_random_event > 30000 && sinricpro_is_connected()) {
+            last_random_event = now;
+
+            // Generate random power level (10-100%)
+            int random_level = 10 + (rand() % 91);
+            current_power_level = random_level;
+
+            printf("[Timer] Sending random power level: %d%%\n", random_level);
+
+            // Update LED to match
+            if (current_power_state) {
+                update_led();
+            }
+
+            // Send event to cloud
+            sinricpro_dimswitch_send_power_level_event(&my_dimmer, random_level);
+        }
+
         // Blink onboard LED when connected
         static uint32_t last_blink = 0;
-        uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_blink > 1000) {
             last_blink = now;
             if (sinricpro_is_connected()) {
