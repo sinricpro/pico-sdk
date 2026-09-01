@@ -37,6 +37,7 @@ add_library(sinricpro STATIC
     src/core/sinricpro_debug.c
     src/core/signature.c
     src/core/message_queue.c
+    src/core/udp_listener.c
     src/core/event_limiter.c
     src/core/websocket_client.c
     src/core/json_helpers.c

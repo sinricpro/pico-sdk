@@ -32,6 +32,12 @@ typedef enum {
  */
 typedef struct {
     sinricpro_interface_t interface;
+    /* Peer the message belongs to, UDP only. Carried per message rather than
+     * held in one slot on the listener: a response can leave several loop
+     * iterations after the request arrived, by which time another peer may
+     * have sent. Stored by value, so it adds nothing to free. */
+    uint32_t peer_addr;   /**< Peer IPv4, network order; 0 when there is none */
+    uint16_t peer_port;   /**< Peer port; 0 when there is none */
     char message[SINRICPRO_MAX_MESSAGE_SIZE];
     size_t length;
     bool in_use;
@@ -93,6 +99,21 @@ bool sinricpro_queue_push(sinricpro_queue_t *queue,
                           size_t length);
 
 /**
+ * @brief Push a message together with the peer it belongs to
+ *
+ * Same as sinricpro_queue_push(), but records where a UDP response must go.
+ *
+ * @param peer_addr Peer IPv4 in network order
+ * @param peer_port Peer port
+ */
+bool sinricpro_queue_push_peer(sinricpro_queue_t *queue,
+                               sinricpro_interface_t interface,
+                               const char *message,
+                               size_t length,
+                               uint32_t peer_addr,
+                               uint16_t peer_port);
+
+/**
  * @brief Pop a message from the queue
  *
  * @param queue     Pointer to queue structure
@@ -107,6 +128,20 @@ bool sinricpro_queue_pop(sinricpro_queue_t *queue,
                          char *message,
                          size_t max_len,
                          size_t *length);
+
+/**
+ * @brief Pop a message together with the peer it belongs to
+ *
+ * @param peer_addr Output: peer IPv4 in network order, 0 when there is none
+ * @param peer_port Output: peer port, 0 when there is none
+ */
+bool sinricpro_queue_pop_peer(sinricpro_queue_t *queue,
+                              sinricpro_interface_t *interface,
+                              char *message,
+                              size_t max_len,
+                              size_t *length,
+                              uint32_t *peer_addr,
+                              uint16_t *peer_port);
 
 /**
  * @brief Peek at the front message without removing it
