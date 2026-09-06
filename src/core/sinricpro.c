@@ -7,6 +7,7 @@
 #include "sinricpro/sinricpro_config.h"
 #include "core/websocket_client.h"
 #include "core/message_queue.h"
+#include "core/udp_listener.h"
 #include "core/signature.h"
 #include "core/json_helpers.h"
 #include "core/sinricpro_debug.h"
@@ -51,9 +52,15 @@ static bool sdk_initialized = false;
 // Forward declarations
 static void on_ws_message(const char *message, size_t length, void *user_data);
 static void on_ws_state(sinricpro_ws_state_t state, void *user_data);
-static void process_incoming_message(const char *message, size_t length);
-static void process_request(cJSON *message);
-static bool send_message(cJSON *message);
+static void process_incoming_message(const char *message, size_t length,
+                                     sinricpro_interface_t interface,
+                                     uint32_t peer_addr, uint16_t peer_port);
+static void process_request(cJSON *message, sinricpro_interface_t interface,
+                            uint32_t peer_addr, uint16_t peer_port);
+static bool send_message(cJSON *message, sinricpro_interface_t interface,
+                         uint32_t peer_addr, uint16_t peer_port);
+static void send_invalid_signature(const cJSON *request, uint32_t peer_addr,
+                                   uint16_t peer_port);
 static void update_device_ids_header(void);
 static void set_state(sinricpro_state_t new_state);
 
@@ -133,6 +140,18 @@ bool sinricpro_begin(void) {
     // Update device IDs header
     update_device_ids_header();
 
+    /* Brought up before the cloud so a board that never reaches SinricPro
+     * still answers the app over the LAN. */
+    /* The cyw43 default power-save mode lets the station sleep through frames
+     * the AP buffers for the broadcast group, which is how a client discovers
+     * a device on a network that drops multicast. Performance mode keeps those
+     * frames arriving; the cost is idle current, not throughput. */
+    cyw43_wifi_pm(&cyw43_state, CYW43_PERFORMANCE_PM);
+
+    if (!sinricpro_udp_start(&ctx.rx_queue)) {
+        SINRICPRO_WARN_PRINTF("[SinricPro] Local control unavailable\n");
+    }
+
     // Connect WebSocket
     set_state(SINRICPRO_STATE_WS_CONNECTING);
 
@@ -154,7 +173,14 @@ bool sinricpro_begin(void) {
         .enable_debug = ctx.config.enable_debug
     };
 
-    return sinricpro_ws_connect(&ws_config);
+    /* A transport failure is not fatal: the reconnect path stays armed and
+     * local control already answers. Callers check sinricpro_is_connected()
+     * for cloud state. */
+    if (!sinricpro_ws_connect(&ws_config)) {
+        SINRICPRO_WARN_PRINTF("[SinricPro] Cloud connect failed; will keep retrying\n");
+    }
+
+    return true;
 }
 
 void sinricpro_handle(void) {
@@ -168,16 +194,29 @@ void sinricpro_handle(void) {
     size_t length;
     sinricpro_interface_t interface;
 
-    while (sinricpro_queue_pop(&ctx.rx_queue, &interface, message,
-                               sizeof(message), &length)) {
-        process_incoming_message(message, length);
+    uint32_t peer_addr;
+    uint16_t peer_port;
+
+    while (sinricpro_queue_pop_peer(&ctx.rx_queue, &interface, message,
+                                    sizeof(message), &length,
+                                    &peer_addr, &peer_port)) {
+        process_incoming_message(message, length, interface, peer_addr, peer_port);
     }
 
-    // Send queued messages
-    if (sinricpro_ws_is_connected()) {
-        while (sinricpro_queue_pop(&ctx.tx_queue, &interface, message,
-                                   sizeof(message), &length)) {
+    /* Routed per message rather than gated as a whole: a LAN reply has to go
+     * out even when the websocket has never connected, which is the case local
+     * control exists for. An event that cannot reach the cloud is dropped --
+     * the queue is a few slots deep and the device re-reports state on
+     * reconnect. */
+    while (sinricpro_queue_pop_peer(&ctx.tx_queue, &interface, message,
+                                    sizeof(message), &length,
+                                    &peer_addr, &peer_port)) {
+        if (interface == SINRICPRO_IF_UDP) {
+            sinricpro_udp_send(message, length, peer_addr, peer_port);
+        } else if (sinricpro_ws_is_connected()) {
             sinricpro_ws_send(message, length);
+        } else {
+            SINRICPRO_WARN_PRINTF("[SinricPro] Dropping event: cloud offline\n");
         }
     }
 }
@@ -275,7 +314,7 @@ bool sinricpro_send_event(const char *device_id, const char *action, cJSON *valu
         }
     }
 
-    bool result = send_message(event);
+    bool result = send_message(event, SINRICPRO_IF_WEBSOCKET, 0, 0);
     cJSON_Delete(event);
 
     return result;
@@ -340,7 +379,9 @@ static void on_ws_state(sinricpro_ws_state_t ws_state, void *user_data) {
     }
 }
 
-static void process_incoming_message(const char *message, size_t length) {
+static void process_incoming_message(const char *message, size_t length,
+                                     sinricpro_interface_t interface,
+                                     uint32_t peer_addr, uint16_t peer_port) {
     // Parse JSON
     cJSON *json = cJSON_ParseWithLength(message, length);
     if (!json) {
@@ -364,6 +405,13 @@ static void process_incoming_message(const char *message, size_t length) {
     if (!signature || !sinricpro_verify_signature(ctx.config.app_secret,
                                                    message, signature)) {
         SINRICPRO_ERROR_PRINTF("[SinricPro] Invalid signature\n");
+
+        /* Answered rather than dropped: it lets a client tell a wrong app
+         * secret from an unreachable device. */
+        if (interface == SINRICPRO_IF_UDP) {
+            send_invalid_signature(json, peer_addr, peer_port);
+        }
+
         cJSON_Delete(json);
         return;
     }
@@ -376,14 +424,15 @@ static void process_incoming_message(const char *message, size_t length) {
     }
 
     if (strcmp(type, SINRICPRO_TYPE_REQUEST) == 0) {
-        process_request(json);
+        process_request(json, interface, peer_addr, peer_port);
     }
     // Response and event types are typically not received from server
 
     cJSON_Delete(json);
 }
 
-static void process_request(cJSON *message) {
+static void process_request(cJSON *message, sinricpro_interface_t interface,
+                            uint32_t peer_addr, uint16_t peer_port) {
     const char *device_id = sinricpro_json_get_device_id(message);
     const char *action = sinricpro_json_get_action(message);
 
@@ -397,7 +446,12 @@ static void process_request(cJSON *message) {
     // Find device
     sinricpro_device_t *device = sinricpro_find_device(device_id);
     if (!device) {
-        SINRICPRO_ERROR_PRINTF("[SinricPro] Device not found: %s\n", device_id);
+        /* A LAN request for someone else's device is not ours to answer. Every
+         * device on an account shares one app secret, so a reply here is
+         * indistinguishable from the real owner's and would send a discovering
+         * client to the wrong address. */
+        SINRICPRO_DEBUG_PRINTF("[SinricPro] Ignoring request for unknown device: %s\n",
+                               device_id);
         return;
     }
 
@@ -421,14 +475,22 @@ static void process_request(cJSON *message) {
         if (success_item) {
             cJSON_SetBoolValue(success_item, success);
         }
+
+        /* Say why it failed. A device that does not implement an action is
+         * still reachable, and a client needs to tell that apart from silence. */
+        if (!success) {
+            cJSON_DeleteItemFromObject(payload, "message");
+            cJSON_AddStringToObject(payload, "message", "Device did not handle request");
+        }
     }
 
     // Send response
-    send_message(response);
+    send_message(response, interface, peer_addr, peer_port);
     cJSON_Delete(response);
 }
 
-static bool send_message(cJSON *message) {
+static bool send_message(cJSON *message, sinricpro_interface_t interface,
+                         uint32_t peer_addr, uint16_t peer_port) {
     if (!message) return false;
 
     // Serialize payload for signing
@@ -461,8 +523,30 @@ static bool send_message(cJSON *message) {
     }
 
     // Queue for sending
-    return sinricpro_queue_push(&ctx.tx_queue, SINRICPRO_IF_WEBSOCKET,
-                                message_str, message_len);
+    return sinricpro_queue_push_peer(&ctx.tx_queue, interface, message_str,
+                                     message_len, peer_addr, peer_port);
+}
+
+/**
+ * Signed refusal for a request that failed verification.
+ *
+ * Built from the unverified request, so every field is read defensively.
+ */
+static void send_invalid_signature(const cJSON *request, uint32_t peer_addr,
+                                   uint16_t peer_port) {
+    cJSON *response = sinricpro_json_create_response(request, false);
+    if (!response) {
+        return;
+    }
+
+    cJSON *payload = cJSON_GetObjectItem(response, "payload");
+    if (payload) {
+        cJSON_DeleteItemFromObject(payload, "message");
+        cJSON_AddStringToObject(payload, "message", "Signature is invalid");
+    }
+
+    send_message(response, SINRICPRO_IF_UDP, peer_addr, peer_port);
+    cJSON_Delete(response);
 }
 
 // Device base implementation

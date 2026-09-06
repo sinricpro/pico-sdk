@@ -37,6 +37,9 @@
 #define LWIP_RAW                        1
 #define LWIP_TCP                        1
 #define LWIP_UDP                        1
+/* Required to join the SinricPro local-control multicast group. Without it
+ * igmp_joingroup() is compiled out and the join silently does nothing. */
+#define LWIP_IGMP                       1
 #define LWIP_DHCP                       1
 #define LWIP_IPV4                       1
 #define LWIP_DNS                        1

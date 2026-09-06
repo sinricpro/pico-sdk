@@ -65,6 +65,13 @@ The following complex devices require additional capabilities and are planned fo
 - **WindowAC** - Window air conditioner control (requires 5 capabilities)
 - **Camera** - IP camera streaming (requires specialized camera capabilities)
 
+## Local Control (LAN/UDP)
+
+From v2.0.0 the SDK answers signed commands directly over the local network, so
+the board keeps responding to the SinricPro app while the cloud is unreachable.
+It listens on UDP 3333 and dispatches through the same device handlers as cloud
+requests.
+
 ## Documentation
 
 - 📚 **[Quick Start Guide](docs/QUICK_START.md)** - Get started in 10 minutes

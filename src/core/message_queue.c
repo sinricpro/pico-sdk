@@ -57,6 +57,15 @@ bool sinricpro_queue_push(sinricpro_queue_t *queue,
                           sinricpro_interface_t interface,
                           const char *message,
                           size_t length) {
+    return sinricpro_queue_push_peer(queue, interface, message, length, 0, 0);
+}
+
+bool sinricpro_queue_push_peer(sinricpro_queue_t *queue,
+                               sinricpro_interface_t interface,
+                               const char *message,
+                               size_t length,
+                               uint32_t peer_addr,
+                               uint16_t peer_port) {
     if (!queue || !message || length == 0) {
         return false;
     }
@@ -83,6 +92,8 @@ bool sinricpro_queue_push(sinricpro_queue_t *queue,
     slot->message[length] = '\0';
     slot->length = length;
     slot->interface = interface;
+    slot->peer_addr = peer_addr;
+    slot->peer_port = peer_port;
     slot->in_use = true;
 
     // Advance head pointer (wrap around)
@@ -98,6 +109,17 @@ bool sinricpro_queue_pop(sinricpro_queue_t *queue,
                          char *message,
                          size_t max_len,
                          size_t *length) {
+    return sinricpro_queue_pop_peer(queue, interface, message, max_len, length,
+                                    NULL, NULL);
+}
+
+bool sinricpro_queue_pop_peer(sinricpro_queue_t *queue,
+                              sinricpro_interface_t *interface,
+                              char *message,
+                              size_t max_len,
+                              size_t *length,
+                              uint32_t *peer_addr,
+                              uint16_t *peer_port) {
     if (!queue || !message || max_len == 0) {
         return false;
     }
@@ -135,10 +157,18 @@ bool sinricpro_queue_pop(sinricpro_queue_t *queue,
     if (length) {
         *length = slot->length;
     }
+    if (peer_addr) {
+        *peer_addr = slot->peer_addr;
+    }
+    if (peer_port) {
+        *peer_port = slot->peer_port;
+    }
 
     // Clear slot
     slot->in_use = false;
     slot->length = 0;
+    slot->peer_addr = 0;
+    slot->peer_port = 0;
 
     // Advance tail pointer (wrap around)
     queue->tail = (queue->tail + 1) % SINRICPRO_MESSAGE_QUEUE_SIZE;

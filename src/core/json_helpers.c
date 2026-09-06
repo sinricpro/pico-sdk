@@ -78,10 +78,10 @@ cJSON *sinricpro_json_create_response(const cJSON *request, bool success) {
     cJSON_AddNumberToObject(payload, "createdAt", sinricpro_json_get_timestamp());
     cJSON_AddStringToObject(payload, "deviceId", device_id);
 
-    // Generate message ID
-    char message_id[40];
-    sinricpro_json_generate_uuid(message_id, sizeof(message_id));
-    cJSON_AddStringToObject(payload, "message", message_id);
+    /* Status text, not an identifier: the cloud and the app surface this
+     * field, and every other SinricPro SDK sends "OK" or the reason a request
+     * was refused. The caller overwrites it on failure. */
+    cJSON_AddStringToObject(payload, "message", "OK");
 
     cJSON_AddStringToObject(payload, "replyToken", reply_token);
     cJSON_AddBoolToObject(payload, "success", success);

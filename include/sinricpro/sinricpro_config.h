@@ -13,10 +13,10 @@ extern "C" {
 // =============================================================================
 // Version Information
 // =============================================================================
-#define SINRICPRO_SDK_VERSION_MAJOR     1
+#define SINRICPRO_SDK_VERSION_MAJOR     2
 #define SINRICPRO_SDK_VERSION_MINOR     0
 #define SINRICPRO_SDK_VERSION_PATCH     0
-#define SINRICPRO_SDK_VERSION           "1.0.0"
+#define SINRICPRO_SDK_VERSION           "2.0.0"
 #define SINRICPRO_PLATFORM              "PICO_W"
 
 // =============================================================================
